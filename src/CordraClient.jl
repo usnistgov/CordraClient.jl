@@ -4,8 +4,8 @@ using HTTP
 using JSON
 using Base64
 using URIs
-""" Global variables """
 
+""" Global variables """
 const objects_endpoint = "objects/"
 const acls_endpoint = "acls/"
 const token_create_endpoint = "auth/token"
@@ -14,12 +14,12 @@ const token_delete_endpoint = "auth/revoke"
 const token_grant_type = "password"
 const token_type = "Bearer"
 
-"""Functions"""
-
+""" General functions used to check HTTP respones, create headers, create urls specific to Cordra """
 function endpoint_url(host, endpoint)
     return strip(host, ['/']) * '/' * endpoint
 end
 
+#Mimicking Python requests' raise_for_status
 function response_ok(response)
     if response.status < 400
         return true
@@ -85,7 +85,7 @@ function get_token_value(token)
     end
 end
 
-"""Objects"""
+"""Functions to work with Cordra objects"""
 
 function CreateObject(
     host,
@@ -124,10 +124,11 @@ function CreateObject(
 
     uri = URI(endpoint_url(host, objects_endpoint))
     uri = URI(uri; query=params)
-    headers = set_headers(username, password, token) #set headers
+    headers = set_headers(username, password, token)
 
     #payloads syntax ["FileDescription" => ["FileName", IOStream-open("path")-]]
-    if !(isnothing(payloads)) #multi-part request: ACLS and Payloads
+    """ Payloads and optional ACLs. Multi-part request """
+    if !(isnothing(payloads))
         data = Dict()
         data["content"] = JSON.json(obj_json)
         if !(isnothing(acls))
@@ -142,15 +143,15 @@ function CreateObject(
 
      
     else
-        """Acls and content, no payloads"""
-        if !(isnothing(acls))
+        
+        if !(isnothing(acls))#ACLs, no payloads. Multi-part request
             data = Dict()
             data["content"] = JSON.json(obj_json)
             data["acl"] = JSON.json(acls)
             body = HTTP.Form(data)
             r = check_response(HTTP.post(uri, headers, body; require_ssl_verification = verify, status_exception = false))
             return r
-        else
+        else #simple request. No ACLs, no payloads
             data = JSON.json(obj_json)
             r = check_response(HTTP.post(uri, headers, data; require_ssl_verification = verify, status_exception = false))
             return r
@@ -404,5 +405,20 @@ function DeleteToken(
 
     return r
 end
+
+""" Check connection to Cordra """
+function CheckConnection(
+    host = "https://localhost:8443",
+    ;verify = false
+    )
+    try
+        HTTP.get(host, [];require_ssl_verification = verify, retry = false)
+        println("Success")
+    catch
+        println("Could not connect")
+    end
+end
+
+
 
 end
