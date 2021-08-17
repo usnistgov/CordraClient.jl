@@ -1,0 +1,2 @@
+This is a sample file to be uploaded as a payload.
+Just a sample.

@@ -85,6 +85,12 @@ function get_token_value(token)
     end
 end
 
+function checkverify(verify)
+    if isnothing(verify)
+        error("Please include a value for ssl verification (verify = )")
+    end
+end
+
 """Functions to work with Cordra objects"""
 
 function CreateObject(
@@ -103,6 +109,7 @@ function CreateObject(
     acls = nothing
     )
     """ Create a Cordra Object """
+    checkverify(verify)
     params = Dict()
     params["type"] = obj_type
     if !(isnothing(handle))
@@ -171,6 +178,7 @@ function ReadObject(
     full=false
     )
     """ Retrieve a Cordra Object JSON by identifier """
+    checkverify(verify)
     params = Dict()
     params["full"] = full
     if !(isnothing(jsonPointer))
@@ -195,6 +203,7 @@ function ReadPayloadInfo(
     verify=nothing
     )
     """ Retrieve a Cordra object payload names by identifier """
+    checkverify(verify)
     params = Dict()
     params["full"] = true
     uri = URI(endpoint_url(host, objects_endpoint) * obj_id)
@@ -214,6 +223,7 @@ function ReadPayload(
     verify=nothing
     )
     """ Retrieve a Cordra object payload by identifier and payload name """
+    checkverify(verify)
     params = Dict()
     params["payload"] = payload
     uri = URI(endpoint_url(host, objects_endpoint) * obj_id)
@@ -240,6 +250,7 @@ function UpdateObject(
     acls=nothing
     )
     """ Update a Cordra object """
+    checkverify(verify)
     params = Dict()
     if !(isnothing(obj_type))
         params["type"] = obj_type
@@ -299,7 +310,7 @@ function DeleteObject(
     verify=nothing
     )
     """ Delete a Cordra Object """
-
+    checkverify(verify)
     params = Dict()
     if !(isnothing(jsonPointer))
         params["jsonPointer"] = jsonPointer
@@ -324,6 +335,7 @@ function FindObject(
     full=false
     )
     """ Find a Cordra object by query """
+    checkverify(verify)
     params = Dict()
     params["query"] = query
     params["full"] = full
@@ -350,6 +362,7 @@ function CreateToken(
     full=false
     )
     """ Create an access Token """
+    checkverify(verify)
     params = Dict()
     params["full"] = full
     auth_json = Dict()
@@ -373,6 +386,7 @@ function ReadToken(
     full=false
     )
     """ Read an access Token """
+    checkverify(verify)
     params = Dict()
     params["full"] = full
 
@@ -394,7 +408,7 @@ function DeleteToken(
     ;verify=nothing,
     )
     """ Delete an access Token """
-
+    checkverify(verify)
     auth_json = Dict()
     auth_json["token"] = get_token_value(token)
 
@@ -415,8 +429,28 @@ function CheckConnection(
         HTTP.get(host, [];require_ssl_verification = verify, retry = false)
         println("Success")
     catch
-        println("Could not connect")
+        throw(error("Could not connect"))
     end
+end
+"""Only for testing"""
+function CheckConnectionTest(
+    host = "https://localhost:8443",
+    ;verify = false
+    )
+    try
+        HTTP.get(host, [];require_ssl_verification = verify, retry = false)
+        return true
+    catch
+        return false
+    end
+end
+
+function ReadConfig(file = "config.json")
+    config = JSON.parsefile(file)
+    host = config["host"]
+    password = config["password"]
+    username = config["username"]
+    return host, username, password
 end
 
 
