@@ -22,8 +22,8 @@ my_acls["readers"] = ["public"]
     @test CordraClient.CheckConnectionTest(host)
     @test CordraClient.ReadToken(host, token, verify = false)["active"] == true
     @test CordraClient.CreateObject(host, test_object, type, dryRun = true, verify = false, token = token)["Integer"] == 55
-    @test CordraClient.CreateObject(host, test_object, type, dryRun = true, verify = false, token = token, payloads = p = ["TextFile" => ["sample_file.txt", open("resources/sample.txt")]])["Integer"] == 55
-    @test CordraClient.CreateObject(host, test_object, type, acls = my_acls, verify = false, token = token, payloads = p = ["TextFile" => ["sample_file.txt", open("resources/sample.txt")]], suffix = "testing")["id"] == "test/testing"
+    @test CordraClient.CreateObject(host, test_object, type, dryRun = true, verify = false, token = token, payloads = ["TextFile" => ["sample_file.txt", open("resources/sample.txt")]])["Integer"] == 55
+    @test CordraClient.CreateObject(host, test_object, type, acls = my_acls, verify = false, token = token, payloads = ["TextFile" => ["sample_file.txt", open("resources/sample.txt")]], suffix = "testing")["id"] == "test/testing"
     @test CordraClient.ReadObject(host, "test/testing", verify = false, token = token, jsonPointer ="/Number") == 2.093482
     @test CordraClient.ReadPayloadInfo(host, "test/testing", verify = false, token = token)[1]["size"] == 65
     @test CordraClient.ReadPayload(host, "test/testing", "TextFile", verify = false, token = token) == "This is a sample file to be uploaded as a payload.\nJust a sample."
@@ -36,3 +36,9 @@ my_acls["readers"] = ["public"]
     @test CordraClient.DeleteObject(host, "test/testing", verify = false, token = token) isa Dict
 end
 
+"""what did not work:
+open("resources/sample.txt") do io
+    p = ["TextFile" => ["sample_file.txt", io]]
+    @test CordraClient.CreateObject(host, test_object, type, acls = my_acls, verify = false, token = token, payloads = p, suffix = "testing")["id"] == "test/testing"
+end
+""""
