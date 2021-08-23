@@ -14,6 +14,7 @@ export update_object
 export delete_object
 export find_object
 export read_token
+export asJSON
 
 """
 A `CordraConnection` uses a username and password to construct a token which
@@ -30,14 +31,14 @@ struct CordraConnection
             "username" => username,
             "password" => password
         )
-        r = check_response(HTTP.request(
+        r = asJSON(check_response(HTTP.request(
             "POST", 
             URI(parse(URI, "$host/auth/token"), query = Dict{String, Any}( "full" => full)), 
             ["Content-type" => "application/json"], 
             JSON.json(auth_json), 
             require_ssl_verification = verify, 
             status_exception = true
-        ))
+        )))
         new(host, r["access_token"], verify)
     end
 end
@@ -51,6 +52,12 @@ function Base.open(f::Function, ::Type{CordraConnection}, host, username, passwo
     finally
         close(cc)
     end
+end
+
+asJSON(r) = JSON.parse(String(r))
+
+function Base.open(::Type{CordraConnection}, host, username, password; verify::Bool=true, full::Bool=false)
+    return CordraConnection(host, username, password, verify=verify, full=full)
 end
 
 function Base.open(f::Function, ::Type{CordraConnection}, file="config.json"; verify::Bool=true, full::Bool=false)
@@ -72,12 +79,11 @@ end
 auth(cc::CordraConnection) = ["Authorization" => "Bearer $(cc.token)"]
 
 function check_response(response)
-    if response.status < 400
-        return JSON.parse(String(copy(response.body)))
-    else
-        println(String(copy(response.body)))
+    if response.status > 400
+        @show String(response.body)
         error(string(copy(response.status)) *" "* HTTP.Messages.statustext(response.status))
     end
+    response.body
 end
 
 """
@@ -133,7 +139,7 @@ function create_object(
             data[x] = HTTP.Multipart(y[1], y[2])
         end
         body = HTTP.Form(data)
-        return check_response(HTTP.post(uri, auth(cc), body; require_ssl_verification = cc.verify, status_exception = false))
+        return asJSON(check_response(HTTP.post(uri, auth(cc), body; require_ssl_verification = cc.verify, status_exception = false)))
     else
         if !isnothing(acls) #ACLs, no payloads. Multi-part request
             body = HTTP.Form(
@@ -142,10 +148,9 @@ function create_object(
                     "acl" => JSON.json(acls)
                 )
             )    
-            r = check_response(HTTP.post(uri, auth(cc), body; require_ssl_verification = cc.verify, status_exception = false))
-            return r
+            return asJSON(check_response(HTTP.post(uri, auth(cc), body; require_ssl_verification = cc.verify, status_exception = false)))
         else #simple request. No ACLs, no payloads
-            return check_response(HTTP.post(uri, auth(cc), JSON.json(obj_json); require_ssl_verification = cc.verify, status_exception = false))
+            return asJSON(check_response(HTTP.post(uri, auth(cc), JSON.json(obj_json); require_ssl_verification = cc.verify, status_exception = false)))
         end
     end
 end
@@ -192,7 +197,7 @@ function read_payload_info(
     obj_id
 )
     uri = URI(parse(URI,"$(cc.host)/objects/$obj_id"), query=Dict{String, Any}("full" => true))
-    r = check_response(HTTP.get(uri, auth(cc); require_ssl_verification = verify, status_exception = false))
+    r = asJSON(check_response(HTTP.get(uri, auth(cc); require_ssl_verification = cc.verify, status_exception = false)))
     return r["payloads"]
 end
 
@@ -203,7 +208,7 @@ function read_payload(
     payload
 )
     uri = URI(parse(URI,"$(cc.host)/objects/$obj_id"), query=Dict{String, Any}( "payload" => payload))
-    return check_response(HTTP.get(uri, auth(cc); require_ssl_verification = verify, status_exception = false))
+    return check_response(HTTP.get(uri, auth(cc); require_ssl_verification = cc.verify, status_exception = false))
 end
 
 function update_object(
@@ -250,15 +255,15 @@ function update_object(
             data[x] = HTTP.Multipart(y[1], y[2])
         end
         body = HTTP.Form(data; boundary = "cordra") #specify boundary
-        return check_response(HTTP.put(uri, headers, body; require_ssl_verification = verify, status_exception = false))
+        return asJSON(check_response(HTTP.put(uri, headers, body; require_ssl_verification = cc.verify, status_exception = false)))
     elseif !isnothing(acls) #just update ACLs
         uri = URI(host = cc.host, path = "acls/$obj_id", query=params)
-        return check_response(HTTP.put(uri, auth(cc), JSON.json(acls); require_ssl_verification = verify, status_exception = false))
+        return asJSON(check_response(HTTP.put(uri, auth(cc), JSON.json(acls); require_ssl_verification = cc.verify, status_exception = false)))
     else #just update object
         if isnothing(obj_json)
             error("obj_json is required")
         end
-        return check_response(HTTP.put(uri, auth(cc), JSON.json(obj_json); require_ssl_verification = verify, status_exception = false))
+        return asJSON(check_response(HTTP.put(uri, auth(cc), JSON.json(obj_json); require_ssl_verification = cc.verify, status_exception = false)))
     end
 end
 
@@ -273,7 +278,7 @@ function delete_object(
         params["jsonPointer"] = jsonPointer
     end
     uri = URI(parse(URI,"$(cc.host)/objects/$obj_id"), query=params)
-    return check_response(HTTP.delete(uri, auth(cc); require_ssl_verification = verify, status_exception = false))
+    return asJSON(check_response(HTTP.delete(uri, auth(cc); require_ssl_verification = cc.verify, status_exception = false)))
 end
 
 """ Find a Cordra object by query """
@@ -295,7 +300,7 @@ function find_object(
         params["ids"] = true
     end
     uri = URI(parse(URI,"$(cc.host)/objects/"), query=params)
-    return check_response(HTTP.get(uri, auth(cc); require_ssl_verification = verify, status_exception = false))
+    return asJSON(check_response(HTTP.get(uri, auth(cc); require_ssl_verification = cc.verify, status_exception = false)))
 end
 
 """ Read an access Token """
@@ -306,8 +311,8 @@ function read_token(
     params = Dict{String, Any}("full" => full)
     auth_json = Dict{String, Any}("token" => cc.token)
     uri = URI(parse(URI,"$(cc.host)/auth/introspect"), query = params)
-    return check_response(HTTP.request("POST", uri, 
-        ["Content-type" => "application/json"], JSON.json(auth_json), require_ssl_verification = verify, status_exception = false))
+    return asJSON(check_response(HTTP.request("POST", uri, 
+        ["Content-type" => "application/json"], JSON.json(auth_json), require_ssl_verification = cc.verify, status_exception = false)))
 end
 
 """ Check connection to Cordra """
