@@ -68,7 +68,7 @@ end
 
 open(CordraConnection, "config.json", verify = false) do cc
     try
-        HTTP.put(URI(parse(URI, "$(cc.host)/schemas/debug")), auth(cc), JSON.json(Dict([])); require_ssl_verification = false, status_exception = false, verbose = 2)
+        HTTP.put(URI(parse(URI, "$(cc.host)/schemas/debug")), auth(cc), JSON.json(Dict{String, String}([])); require_ssl_verification = false, status_exception = false, verbose = 2)
     catch
         println("Could not upload debug type to $(cc.host)")
     end
