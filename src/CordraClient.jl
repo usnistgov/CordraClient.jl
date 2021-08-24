@@ -36,7 +36,7 @@ struct CordraConnection
             ["Content-type" => "application/json"], 
             JSON.json(auth_json), 
             require_ssl_verification = verify, 
-            status_exception = true
+            status_exception = true #question
         ))
         new(host, r["access_token"], verify)
     end
@@ -105,7 +105,7 @@ function create_object(
     full = false,
     payloads = nothing,
     acls = nothing
-)
+    )
     params = Dict{String, Any}("type" => obj_type)
     if !isnothing(handle)
         params["handle"] = handle
@@ -159,7 +159,7 @@ end
         full=false
         )
 
-Retrieve a Cordra Object JSON by identifier 
+Retrieve a Cordra Object JSON by identifier. 
 """
 function read_object(
     cc::CordraConnection,
@@ -190,22 +190,45 @@ Retrieve a Cordra object payload names by identifier.
 function read_payload_info(
     cc::CordraConnection,
     obj_id
-)
+    )
     uri = URI(parse(URI,"$(cc.host)/objects/$obj_id"), query=Dict{String, Any}("full" => true))
     r = check_response(HTTP.get(uri, auth(cc); require_ssl_verification = verify, status_exception = false))
     return r["payloads"]
 end
 
-""" Retrieve a Cordra object payload by identifier and payload name """
+""" 
+    read_payload(
+        cc::CordraConnection,
+        obj_id,
+        payload
+        )
+
+Retrieve a Cordra object payload by identifier and payload name.
+"""
 function read_payload(
     cc::CordraConnection,
     obj_id,
     payload
-)
+    )
     uri = URI(parse(URI,"$(cc.host)/objects/$obj_id"), query=Dict{String, Any}( "payload" => payload))
     return check_response(HTTP.get(uri, auth(cc); require_ssl_verification = verify, status_exception = false))
 end
+"""
+    update_object(
+        cc::CordraConnection,
+        obj_id;
+        obj_json=nothing,
+        jsonPointer=nothing,
+        obj_type=nothing,
+        dryRun=false,
+        full=false,
+        payloads=nothing,
+        payloadToDelete=nothing,
+        acls=nothing
+        )
 
+Update a Cordra object.
+"""
 function update_object(
     cc::CordraConnection,
     obj_id;
@@ -217,8 +240,8 @@ function update_object(
     payloads=nothing,
     payloadToDelete=nothing,
     acls=nothing
-)
-    """ Update a Cordra object """
+    )
+    
     params = Dict{String, Any}()
     if !isnothing(obj_type)
         params["type"] = obj_type
@@ -262,12 +285,20 @@ function update_object(
     end
 end
 
-""" Delete a Cordra Object """
+"""
+    delete_object(
+        cc::CordraConnection,
+        obj_id;
+        jsonPointer=nothing
+        )
+
+Delete a Cordra Object.
+"""
 function delete_object(
     cc::CordraConnection,
     obj_id;
     jsonPointer=nothing
-)
+    )
     params = Dict{String, Any}()
     if !(isnothing(jsonPointer))
         params["jsonPointer"] = jsonPointer
@@ -276,14 +307,24 @@ function delete_object(
     return check_response(HTTP.delete(uri, auth(cc); require_ssl_verification = verify, status_exception = false))
 end
 
-""" Find a Cordra object by query """
+""" 
+    find_object(
+        cc::CordraConnection,
+        query;
+        ids=false,
+        jsonFilter=nothing,
+        full=false
+        )
+
+Find a Cordra object by query.
+"""
 function find_object(
     cc::CordraConnection,
     query;
     ids=false,
     jsonFilter=nothing,
     full=false
-)
+    )
     params = Dict{String, Any}( 
         "query" => query,
         "full" => full
@@ -298,11 +339,17 @@ function find_object(
     return check_response(HTTP.get(uri, auth(cc); require_ssl_verification = verify, status_exception = false))
 end
 
-""" Read an access Token """
+"""
+    read_token(
+        cc::CordraConnection;
+        full=false
+        )    
+Read an access Token.
+"""
 function read_token(
     cc::CordraConnection;
     full=false
-)
+    )
     params = Dict{String, Any}("full" => full)
     auth_json = Dict{String, Any}("token" => cc.token)
     uri = URI(parse(URI,"$(cc.host)/auth/introspect"), query = params)
@@ -310,11 +357,17 @@ function read_token(
         ["Content-type" => "application/json"], JSON.json(auth_json), require_ssl_verification = verify, status_exception = false))
 end
 
-""" Check connection to Cordra """
+""" 
+    check_connection(
+        host = "https://localhost:8443";
+        verify = false
+        )
+Check connection to Cordra.
+"""
 function check_connection(
     host = "https://localhost:8443";
     verify = false
-)
+    )
     try
         HTTP.get(host, []; require_ssl_verification = verify, retry = false)
         println("Success")

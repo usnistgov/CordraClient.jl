@@ -4,3 +4,7 @@
 #local files
 local.jl
 config_l.json
+local_test.jl
+
+#config file
+config.json
