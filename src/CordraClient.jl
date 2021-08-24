@@ -82,7 +82,7 @@ auth(cc::CordraConnection) = ["Authorization" => "Bearer $(cc.token)"]
 # Checks for errors and only returns the response.body if there are none
 function check_response(response)
     if response.status > 400
-        @show response.body
+        @show _json(response.body)["message"]
         error(string(copy(response.status)) *" "* HTTP.Messages.statustext(response.status))
     end
     response.body
