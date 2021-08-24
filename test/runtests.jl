@@ -16,7 +16,7 @@ using Test
         "readers" => ["public"]
     )
     
-    open(CordraConnection, "config.json", verify = false) do cc
+    open(CordraConnection, "config.json"; verify = false) do cc
         @test create_object(cc, test_object, type, dryRun = true)["Integer"] == 55
         @test create_object(cc, test_object, type, dryRun = true, payloads = ["TextFile" => ["sample_file.txt", open("resources/sample.txt")]])["Integer"] == 55
         @test create_object(cc, test_object, type, acls = my_acls, payloads = ["TextFile" => ["sample_file.txt", open("resources/sample.txt")]], suffix = "testing")["id"] == "test/testing"
@@ -38,4 +38,4 @@ open("resources/sample.txt") do io
     p = ["TextFile" => ["sample_file.txt", io]]
     @test CordraClient.create_object(host, test_object, type, acls = my_acls, verify = false, token = token, payloads = p, suffix = "testing")["id"] == "test/testing"
 end
-""""
+"""

@@ -73,7 +73,11 @@ auth(cc::CordraConnection) = ["Authorization" => "Bearer $(cc.token)"]
 
 function check_response(response)
     if response.status < 400
-        return JSON.parse(String(copy(response.body)))
+        try
+            return JSON.parse(String(copy(response.body)))
+        catch
+            return String(copy(response.body))
+        end
     else
         println(String(copy(response.body)))
         error(string(copy(response.status)) *" "* HTTP.Messages.statustext(response.status))
@@ -192,7 +196,7 @@ function read_payload_info(
     obj_id
     )
     uri = URI(parse(URI,"$(cc.host)/objects/$obj_id"), query=Dict{String, Any}("full" => true))
-    r = check_response(HTTP.get(uri, auth(cc); require_ssl_verification = verify, status_exception = false))
+    r = check_response(HTTP.get(uri, auth(cc); require_ssl_verification = cc.verify, status_exception = false))
     return r["payloads"]
 end
 
@@ -211,7 +215,7 @@ function read_payload(
     payload
     )
     uri = URI(parse(URI,"$(cc.host)/objects/$obj_id"), query=Dict{String, Any}( "payload" => payload))
-    return check_response(HTTP.get(uri, auth(cc); require_ssl_verification = verify, status_exception = false))
+    return check_response(HTTP.get(uri, auth(cc); require_ssl_verification = cc.verify, status_exception = false))
 end
 """
     update_object(
@@ -273,15 +277,15 @@ function update_object(
             data[x] = HTTP.Multipart(y[1], y[2])
         end
         body = HTTP.Form(data; boundary = "cordra") #specify boundary
-        return check_response(HTTP.put(uri, headers, body; require_ssl_verification = verify, status_exception = false))
+        return check_response(HTTP.put(uri, headers, body; require_ssl_verification = cc.verify, status_exception = false))
     elseif !isnothing(acls) #just update ACLs
         uri = URI(host = cc.host, path = "acls/$obj_id", query=params)
-        return check_response(HTTP.put(uri, auth(cc), JSON.json(acls); require_ssl_verification = verify, status_exception = false))
+        return check_response(HTTP.put(uri, auth(cc), JSON.json(acls); require_ssl_verification = cc.verify, status_exception = false))
     else #just update object
         if isnothing(obj_json)
             error("obj_json is required")
         end
-        return check_response(HTTP.put(uri, auth(cc), JSON.json(obj_json); require_ssl_verification = verify, status_exception = false))
+        return check_response(HTTP.put(uri, auth(cc), JSON.json(obj_json); require_ssl_verification = cc.verify, status_exception = false))
     end
 end
 
@@ -304,7 +308,7 @@ function delete_object(
         params["jsonPointer"] = jsonPointer
     end
     uri = URI(parse(URI,"$(cc.host)/objects/$obj_id"), query=params)
-    return check_response(HTTP.delete(uri, auth(cc); require_ssl_verification = verify, status_exception = false))
+    return check_response(HTTP.delete(uri, auth(cc); require_ssl_verification = cc.verify, status_exception = false))
 end
 
 """ 
@@ -336,7 +340,7 @@ function find_object(
         params["ids"] = true
     end
     uri = URI(parse(URI,"$(cc.host)/objects/"), query=params)
-    return check_response(HTTP.get(uri, auth(cc); require_ssl_verification = verify, status_exception = false))
+    return check_response(HTTP.get(uri, auth(cc); require_ssl_verification = cc.verify, status_exception = false))
 end
 
 """
@@ -354,7 +358,7 @@ function read_token(
     auth_json = Dict{String, Any}("token" => cc.token)
     uri = URI(parse(URI,"$(cc.host)/auth/introspect"), query = params)
     return check_response(HTTP.request("POST", uri, 
-        ["Content-type" => "application/json"], JSON.json(auth_json), require_ssl_verification = verify, status_exception = false))
+        ["Content-type" => "application/json"], JSON.json(auth_json), require_ssl_verification = cc.verify, status_exception = false))
 end
 
 """ 
