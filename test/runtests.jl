@@ -15,23 +15,36 @@ using Test
         "writers" => ["public"],
         "readers" => ["public"]
     )
+
+    test_name = "test/testing"
     
     path = joinpath(@__DIR__)
 
     open(CordraConnection, joinpath(path, "config.json"), verify = false) do cc
-        @test create_object(cc, test_object, type, dryRun = true)["Integer"] == 55
-        @test create_object(cc, test_object, type, dryRun = true, payloads = ["TextFile" => ["sample_file.txt", open(joinpath(path, "resources", "sample.txt"))]])["Integer"] == 55
-        @test create_object(cc, test_object, type, acls = my_acls, payloads = ["TextFile" => ["sample_file.txt", open(joinpath(path, "resources", "sample.txt"))]], suffix = "testing")["id"] == "test/testing"
-        @test asString(read_object(cc, "test/testing", jsonPointer ="/Number")) == "2.093482"
-        @test read_payload_info(cc, "test/testing")[1]["size"] == 66
-        @test String(read_payload(cc, "test/testing", "TextFile")) == "This is a sample file to be uploaded as a payload.\r\nJust a sample."
-        @test update_object(cc, "test/testing", obj_json = test_object, acls=my_acls, payloads = p = ["TestingNewFile" => ["sample_file_2.txt", open(joinpath(path, "resources", "sample.txt"))]])["Integer"] == 55
-        @test String(read_payload(cc, "test/testing", "TestingNewFile")) == "This is a sample file to be uploaded as a payload.\r\nJust a sample."
-        @test update_object(cc, "test/testing", jsonPointer = "/Integer", obj_json = 326) == 326
-        @test String(read_object(cc, "test/testing", jsonPointer ="/Integer")) == "326"
-        @test update_object(cc, "test/testing", obj_json = test_object, payloadToDelete = "TestingNewFile")["Integer"] == 55
-        @test length(read_payload_info(cc, "test/testing")) == 1
-        @test delete_object(cc, "test/testing") isa Dict
+        if find_object(cc, "id:\""*test_name*"\"")["size"]==1
+            delete_object(cc, test_name)
+            @assert find_object(cc, "id:\""*test_name*"\"")["size"]==0
+        end
+        if find_object(cc, "/debug")["size"]==0
+            update_object(cc, "/schemas/debug", obj_json = Dict{String,Any}())
+        end
+        @test create_object(cc, test_name, test_object, type, dryRun = true)["Integer"] == 55
+        @test find_object(cc, "id:\""*test_name*"\"")["size"]==0
+        @test create_object(cc, test_name, test_object, type, dryRun = true, payloads = ["TextFile" => ["sample_file.txt", open(joinpath(path, "resources", "sample.txt"))]])["Integer"] == 55
+        @test find_object(cc, "id:\""*test_name*"\"")["size"]==0
+        @test create_object(cc, test_name, test_object, type, acls = my_acls, payloads = ["TextFile" => ["sample_file.txt", open(joinpath(path, "resources", "sample.txt"))]], suffix = "testing")["id"] == "test/testing"
+        @test find_object(cc, "id:\""*test_name*"\"")["size"]==1
+        @test String(read_object(cc, test_name, jsonPointer ="/Number")) == "2.093482"
+        @test read_payload_info(cc, test_name)[1]["size"] in (65,  66) # *NIX vs Windows
+        @test String(read_payload(cc, test_name, "TextFile")) == "This is a sample file to be uploaded as a payload.\r\nJust a sample."
+        @test update_object(cc, test_name, obj_json = test_object, acls=my_acls, payloads = ["TestingNewFile" => ["alien.png", open(joinpath(path, "resources", "alien.png"))]])["Integer"] == 55
+        @test length(read_payload(cc, test_name, "TestingNewFile")) == 15647
+        @test update_object(cc, test_name, jsonPointer = "/Integer", obj_json = 326) == 326
+        @test String(read_object(cc, test_name, jsonPointer ="/Integer")) == "326"
+        @test update_object(cc, test_name, obj_json = test_object, payloadToDelete = "TestingNewFile")["Integer"] == 55
+        @test length(read_payload_info(cc, test_name)) == 1
+        delete_object(cc, test_name) isa Dict
+        @assert find_object(cc, "id:\""*test_name*"\"")["size"]==0
     end
 end
 
