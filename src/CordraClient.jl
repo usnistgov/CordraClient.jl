@@ -230,7 +230,7 @@ function update_object(
     payloads=nothing,
     payloadToDelete=nothing,
     acls=nothing
-)::Dict{String, Any}
+)
     """ Update a Cordra object """
     params = Dict{String, Any}( "full" => full)
     (!isnothing(obj_type)) && (params["type"] = obj_type)
@@ -243,7 +243,7 @@ function update_object(
         isnothing(obj_json) && error("obj_json is required when updating payload")
         # Construct the body
         data = Dict{String, Any}( "content" => JSON.json(obj_json))
-        (!isnothing(acls)) || (data["acl"] = JSON.json(acls)) 
+        (!isnothing(acls)) && (data["acl"] = JSON.json(acls)) 
         for (x,y) in payloads
             data[x] = HTTP.Multipart(y[1], y[2])
         end
@@ -278,7 +278,7 @@ function find_object(
     query::AbstractString;
     ids=nothing,
     jsonFilter=nothing,
-    full=false
+    full=false #page num and page size? default pagenum = 0, pagesize = 10
 )
     params = Dict{String, Any}( 
         "query" => query,

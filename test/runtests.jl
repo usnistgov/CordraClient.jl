@@ -36,7 +36,7 @@ using Test
         @test find_object(cc, "id:\"$test_name\"")["size"]==1
         @test String(read_object(cc, test_name, jsonPointer ="/Number")) == "2.093482"
         @test read_payload_info(cc, test_name)[1]["size"] in (65,  66) # *NIX vs Windows
-        @test String(read_payload(cc, test_name, "TextFile")) == "This is a sample file to be uploaded as a payload.\r\nJust a sample."
+        @test String(read_payload(cc, test_name, "TextFile")) in ("This is a sample file to be uploaded as a payload.\r\nJust a sample.", "This is a sample file to be uploaded as a payload.\nJust a sample.") # *NIX vs Windows
         @test update_object(cc, test_name, obj_json = test_object, acls=my_acls, payloads = ["TestingNewFile" => ["alien.png", open(joinpath(path, "resources", "alien.png"))]])["Integer"] == 55
         @test length(read_payload(cc, test_name, "TestingNewFile")) == 15647
         @test update_object(cc, test_name, jsonPointer = "/Integer", obj_json = 326) == 326
