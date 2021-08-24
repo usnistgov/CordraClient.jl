@@ -182,7 +182,6 @@ function read_payload_info(
     )
     uri = URI(parse(URI,"$(cc.host)/objects/$obj_id"), query=Dict{String, Any}("full" => true))
     r = _json(check_response(HTTP.get(uri, auth(cc); require_ssl_verification = cc.verify, status_exception = false)))
-    @show r
     return r["payloads"]
 end
 

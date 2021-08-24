@@ -30,9 +30,9 @@ using Test
         end
         @test create_object(cc, test_name, test_object, type, dryRun = true)["Integer"] == 55
         @test find_object(cc, "id:\"$test_name\"")["size"]==0
-        @test create_object(cc, test_name, test_object, type, dryRun = true, payloads = ["TextFile" => ["sample_file.txt", open(joinpath(path, "resources", "sample.txt"))]])["Integer"] == 55
+        @test create_object(cc, test_name, test_object, type, dryRun = true, payloads = ["TextFile" => [ "sample_file.txt", open(joinpath(path, "resources", "sample.txt"))]])["Integer"] == 55
         @test find_object(cc, "id:\"$test_name\"")["size"]==0
-        @test create_object(cc, test_name, test_object, type, acls = my_acls, payloads = ["TextFile" => ["sample_file.txt", open(joinpath(path, "resources", "sample.txt"))]], suffix = "testing")["id"] == "test/testing"
+        @test create_object(cc, test_name, test_object, type, acls = my_acls, payloads = ["TextFile" => [ "sample_file.txt", open(joinpath(path, "resources", "sample.txt"))]])["id"] == "test/testing"
         @test find_object(cc, "id:\"$test_name\"")["size"]==1
         @test String(read_object(cc, test_name, jsonPointer ="/Number")) == "2.093482"
         @test read_payload_info(cc, test_name)[1]["size"] in (65,  66) # *NIX vs Windows
@@ -43,7 +43,7 @@ using Test
         @test String(read_object(cc, test_name, jsonPointer ="/Integer")) == "326"
         @test update_object(cc, test_name, obj_json = test_object, payloadToDelete = "TestingNewFile")["Integer"] == 55
         @test length(read_payload_info(cc, test_name)) == 1
-        delete_object(cc, test_name) isa Dict
+        delete_object(cc, test_name)
         @assert find_object(cc, "id:\"$test_name\"")["size"]==0
     end
 end
