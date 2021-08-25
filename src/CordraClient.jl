@@ -91,18 +91,28 @@ end
 """
     create_object(
         cc::CordraConnection,
-        obj_json=nothing,
-        obj_type=nothing;
-        handle=nothing,
+        obj_id::AbstractString,        # the object's ID
+        obj_json::Dict{String,<:Any},  # the object's JSON data.
+        obj_type::AbstractString;      # the object's data schema name.
         suffix=nothing,
-        dryRun = false,
-        full = false,
-        payloads = nothing,
-        acls = nothing
-        )
+        dryRun = false,                # Don't actually add the item
+        full = false,                  # Return meta-data in addition to object data
+        payloads = nothing,            # payload data (like binary or file data)
+        acls = nothing                 # Access control lists as a Dict{String, Any}
+    )
 
-Create a Cordra database object.  Syntax for payloads: `["FileDescription" => ["FileName", open("path")]]`
-    
+Create a Cordra database object. 
+
+Syntax for `payloads`: 
+
+    ["FileDescription" => HTTP.Multipart("name",io,"mime/type")]
+    ["FileDescription" => ("name",io,"mime/type")]
+    Dict("FileDescription" => ("name",io,"mime/type"))
+    Dict("FileDescription" => ("name",io))
+    Dict("FileDescription" => ["name",io])
+    Dict("FileDescription" => HTTP.Multipart("name",io,"mime/type"))
+
+or similar where `io` is an `IOStream`.
 """
 function create_object(
     cc::CordraConnection,
@@ -139,10 +149,10 @@ end
 """ 
     read_object(
         cc::CordraConnection,
-        obj_id;
-        jsonPointer=nothing,
-        jsonFilter=nothing,
-        full=false
+        obj_id;                 # The object ID
+        jsonPointer=nothing,    # An optional name of an item in the object
+        jsonFilter=nothing,     # An optional filter to items in the object
+        full=false              # Return meta-data in addition to object data?
     )::Vector{UInt8}
 
 Retrieve a Cordra Object JSON by identifier.  The `jsonPointer` and `jsonFilter` parameters can be used to
@@ -150,8 +160,8 @@ only retrieve parts of an object.
 
 Converting the result into an object of the appropriate type depends on the object data.  The method returns
 a `Vector{UInt8}` which can be converted to:
-    * String -> String(res)
-    * Dict{String, Any} from JSON -> JSON.parse(String(res))
+    * String -> String(copy(res))
+    * Dict{String, Any} from JSON -> JSON.parse(String(copy(res)))
     * Float64, Int32, etc -> reinterpret(Float64, res) 
 """
 function read_object(
@@ -218,6 +228,8 @@ end
         )
 
 Update a Cordra object.
+
+See the create_object(...) documentation for details on `payloads`
 """
 function update_object(
     cc::CordraConnection,
@@ -284,8 +296,8 @@ function find_object(
         "query" => query,
         "full" => full
     )
-    if !isnothing(jsonFilter)
-        params["filter"] = string(jsonFilter)
+    (!isnothing(jsonFilter)) && (params["filter"] = string(jsonFilter))
+    (!isnothing(ids)) && ( params["ids"] = true )
     end
     if !isnothing(ids)
         params["ids"] = true
