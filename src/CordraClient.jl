@@ -230,7 +230,7 @@ function update_object(
     payloads=nothing,
     payloadToDelete=nothing,
     acls=nothing
-)
+)::Dict{String, Any}
     """ Update a Cordra object """
     params = Dict{String, Any}( "full" => full)
     (!isnothing(obj_type)) && (params["type"] = obj_type)
@@ -252,11 +252,11 @@ function update_object(
         headers = ["Content-Type" => "multipart/form-data; boundary=cordra", auth(cc)... ]
         return _json(check_response(HTTP.put(uri, headers, body; require_ssl_verification = cc.verify, status_exception = false)))
     elseif !isnothing(acls) #just update ACLs
-        uri = URI(host = cc.host, path = "acls/$obj_id", query=params)
+        uri = URI(parse(URI,"$(cc.host)/acls/$obj_id"), query=params)
         return _json(check_response(HTTP.put(uri, auth(cc), JSON.json(acls); require_ssl_verification = cc.verify, status_exception = false)))
     else #just update object
         isnothing(obj_json) && error("obj_json is required")
-        return _json(check_response(HTTP.put(uri, auth(cc), JSON.json(obj_json); require_ssl_verification = cc.verify, status_exception = false)))
+        return Dict([string(strip(jsonPointer, ['/'])) => _json(check_response(HTTP.put(uri, auth(cc), JSON.json(obj_json); require_ssl_verification = cc.verify, status_exception = false)))])
     end
 end
 
