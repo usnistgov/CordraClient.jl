@@ -125,6 +125,9 @@ function create_object(
     payloads = nothing,
     acls = nothing
 )::Dict{String, Any}
+    # Interpreting payload
+    _mp(y) = HTTP.Multipart(y...)
+    _mp(y::HTTP.Multipart) = y
     # Set up uri with params
     params = Dict{String, Any}(
         "type" => obj_type, 
@@ -139,7 +142,7 @@ function create_object(
     (!isnothing(acls)) && (data["acl"] = JSON.json(acls))
     if !isnothing(payloads)
         for (x,y) in payloads
-            data[x] = HTTP.Multipart(y[1], y[2])
+            data[x] = _mp(y)
         end
     end
     # Post the object
@@ -243,7 +246,10 @@ function update_object(
     payloadToDelete=nothing,
     acls=nothing
 )::Dict{String, Any}
-    """ Update a Cordra object """
+    # Interpreting payload
+    _mp(y) = HTTP.Multipart(y...)
+    _mp(y::HTTP.Multipart) = y
+    # Configure params
     params = Dict{String, Any}( "full" => full)
     (!isnothing(obj_type)) && (params["type"] = obj_type)
     dryRun && (params["dryRun"] = true)
@@ -257,7 +263,7 @@ function update_object(
         data = Dict{String, Any}( "content" => JSON.json(obj_json))
         (!isnothing(acls)) && (data["acl"] = JSON.json(acls)) 
         for (x,y) in payloads
-            data[x] = HTTP.Multipart(y[1], y[2])
+            data[x] = _mp(y)
         end
         body = HTTP.Form(data; boundary = "cordra") #specify boundary
         #HTTP issue: need to specify boundary
@@ -298,10 +304,6 @@ function find_object(
     )
     (!isnothing(jsonFilter)) && (params["filter"] = string(jsonFilter))
     (!isnothing(ids)) && ( params["ids"] = true )
-    end
-    if !isnothing(ids)
-        params["ids"] = true
-    end
     uri = URI(parse(URI,"$(cc.host)/objects/"), query=params)
     return _json(check_response(HTTP.get(uri, auth(cc); require_ssl_verification = cc.verify, status_exception = false)))
 end
