@@ -22,8 +22,9 @@ export delete_payload
 A `CordraConnection` uses a username and password to construct a token which
 will be used to access a Cordra host.
 """
-struct CordraConnection
+struct CordraConnection #suggestion: username
     host::String # URL of host
+    username::String # Username
     token::String # Authentication token
     verify::Bool # Require SSL verification?
 
@@ -39,9 +40,10 @@ struct CordraConnection
             ["Content-type" => "application/json"], 
             JSON.json(auth_json), 
             require_ssl_verification = verify, 
-            status_exception = true # question
+            status_exception = true,
+            verbose = 2 # question
         )))
-        new(host, r["access_token"], verify)
+        new(host, r["username"], r["access_token"], verify)
     end
 end
 
@@ -84,7 +86,7 @@ auth(cc::CordraConnection) = ["Authorization" => "Bearer $(cc.token)"]
 # Checks for errors and only returns the response.body if there are none
 function check_response(response)
     if response.status > 400
-        @show _json(response.body)["message"]
+        (!isempty(response.body)) && @show _json(response.body)["message"]
         error(string(copy(response.status)) *" "* HTTP.Messages.statustext(response.status))
     end
     response.body
@@ -373,7 +375,7 @@ function find_object(
     jsonFilter=nothing,
     full::Bool=false,
     pageNum::Int=0,
-    pageSize::Int=10 #page num and page size? default pagenum = 0, pagesize = 10
+    pageSize::Int=10
 )
     params = Dict{String, Any}( 
         "query" => query,
@@ -384,7 +386,7 @@ function find_object(
     )
     (!isnothing(jsonFilter)) && (params["filter"] = string(jsonFilter))
     uri = URI(parse(URI,"$(cc.host)/objects/"), query=params)
-    return _json(check_response(HTTP.get(uri, auth(cc); require_ssl_verification = cc.verify, status_exception = false)))
+    return _json(check_response(HTTP.get(uri, auth(cc); require_ssl_verification = cc.verify, status_exception = false))) #not working well
 end
 
 """ 
