@@ -1,5 +1,6 @@
 using CordraClient
 using Test
+using HTTP
 
 @testset "CordraClient.jl" begin
 

@@ -15,6 +15,8 @@ export update_object
 export delete_object
 export find_object
 export read_token
+export delete_payload
+
 
 """
 A `CordraConnection` uses a username and password to construct a token which
@@ -167,7 +169,7 @@ a `Vector{UInt8}` which can be converted to:
     * Dict{String, Any} from JSON -> JSON.parse(String(copy(res)))
     * Float64, Int32, etc -> reinterpret(Float64, res) 
 """
-function read_object(
+function read_object( #Discuss interpretations
     cc::CordraConnection,
     obj_id::AbstractString;
     jsonPointer=nothing,
@@ -180,6 +182,7 @@ function read_object(
     uri = URI(parse(URI,"$(cc.host)/objects/$obj_id"), query=params)
     return check_response(HTTP.get(uri, auth(cc); require_ssl_verification = cc.verify, status_exception = false))
 end
+
 
 """ 
     read_payload_info(
@@ -243,7 +246,6 @@ function update_object(
     dryRun=false,
     full=false,
     payloads=nothing,
-    payloadToDelete=nothing,
     acls=nothing
 )::Dict{String, Any}
     # Interpreting payload
@@ -254,13 +256,15 @@ function update_object(
     (!isnothing(obj_type)) && (params["type"] = obj_type)
     dryRun && (params["dryRun"] = true)
     (!isnothing(jsonPointer)) && (params["jsonPointer"] = jsonPointer)
-    (!isnothing(payloadToDelete)) && (params["payloadToDelete"] = payloadToDelete)
 
     uri = URI(parse(URI,"$(cc.host)/objects/$obj_id"), query=params)
-    if !isnothing(payloads) #multi-part request        
-        isnothing(obj_json) && error("obj_json is required when updating payload")
+    if !isnothing(payloads) #multi-part request
         # Construct the body
-        data = Dict{String, Any}( "content" => JSON.json(obj_json))
+        if !isnothing(obj_json)
+            data = Dict{String, Any}( "content" => JSON.json(obj_json)) # keep original object JSON if one is not provided
+        else
+            data = Dict{String, Any}( "content" => JSON.json(_json(read_object(cc, obj_id))))
+        end
         (!isnothing(acls)) && (data["acl"] = JSON.json(acls)) 
         for (x,y) in payloads
             data[x] = _mp(y)
@@ -274,36 +278,99 @@ function update_object(
         return _json(check_response(HTTP.put(uri, auth(cc), JSON.json(acls); require_ssl_verification = cc.verify, status_exception = false)))
     else #just update object
         isnothing(obj_json) && error("obj_json is required")
-        return Dict([string(strip(jsonPointer, ['/'])) => _json(check_response(HTTP.put(uri, auth(cc), JSON.json(obj_json); require_ssl_verification = cc.verify, status_exception = false)))])
+        if !isnothing(jsonPointer)
+            return Dict([string(strip(jsonPointer, ['/'])) => _json(check_response(HTTP.put(uri, auth(cc), JSON.json(obj_json); require_ssl_verification = cc.verify, status_exception = false)))])
+        else
+            return _json(check_response(HTTP.put(uri, auth(cc), JSON.json(obj_json); require_ssl_verification = cc.verify, status_exception = false)))
+        end
     end
 end
 
-""" Delete a Cordra Object """
+"""
+    delete_object(
+        cc::CordraConnection,
+        obj_id::AbstractString;   # The object ID
+        jsonPointer=nothing       
+        )
+If `jsonPointer` is specified, instead of deleting the object, only the content at the specified JSON pointer will be deleted (including the pointer itself).
+
+Delete a Cordra Object.
+"""
 function delete_object(
     cc::CordraConnection,
     obj_id::AbstractString;
     jsonPointer=nothing
 )
     params = Dict{String, Any}()
-    (!(isnothing(jsonPointer))) && (params["jsonPointer"] = jsonPointer)
+    if !isnothing(jsonPointer)
+        read_object(cc, obj_id, jsonPointer = jsonPointer) # Throws error if jsonPointer not found
+        params["jsonPointer"] = jsonPointer
+    end
     uri = URI(parse(URI,"$(cc.host)/objects/$obj_id"), query=params)
+    r = _json(check_response(HTTP.delete(uri, auth(cc); require_ssl_verification = cc.verify, status_exception = false)))
+    if isempty(r) # test this. I cannot come up with a case where this would not work
+        if isnothing(jsonPointer)
+            return "Succesfully deleted object with id $obj_id"
+        else
+            return "Succesfully deleted $jsonPointer from object with id $obj_id"
+        end
+    end
+        
+end
+
+"""
+    delete_payload(
+        cc::CordraConnection,
+        obj_id,              # The object ID
+        payload              # The name of the payload to delete
+        )
+
+Delete a payload from a Cordra object.
+"""
+function delete_payload(
+    cc::CordraConnection,
+    obj_id::AbstractString,
+    payload::AbstractString
+)
+    read_payload(cc, obj_id, payload) # Throws error if payload not found
+    params = Dict{String, Any}()
+    params["payload"] = payload
+    uri = URI(parse(URI,"$(cc.host)/objects/$obj_id"), query=params) 
     return _json(check_response(HTTP.delete(uri, auth(cc); require_ssl_verification = cc.verify, status_exception = false)))
 end
 
-""" Find a Cordra object by query """
+""" 
+    find_object(
+        cc::CordraConnection,
+        query::AbstractString;
+        ids::Bool=false,      # If true, the search returns the ids of the matched objects only.
+        jsonFilter=nothing,   # An optional filter to items in the object
+        full::Bool=false,     # Return meta-data in addition to object data?
+        pageNum::Int=0,       # The desired results page number. 0 is the first page
+        pageSize::Int=10      
+        )
+    
+`pageSize` defines the number of results per page. If negative no limit. If 0 no results are returned, only the size (number of hits).
+
+Find a Cordra object by query.
+"""
 function find_object(
     cc::CordraConnection,
     query::AbstractString;
-    ids=nothing,
+    ids::Bool=false,
     jsonFilter=nothing,
-    full=false #page num and page size? default pagenum = 0, pagesize = 10
+    full::Bool=false,
+    pageNum::Int=0,
+    pageSize::Int=10 #page num and page size? default pagenum = 0, pagesize = 10
 )
     params = Dict{String, Any}( 
         "query" => query,
-        "full" => full
+        "ids" => ids,
+        "full" => full,
+        "pageNum" => pageNum,
+        "pageSize" => pageSize
     )
     (!isnothing(jsonFilter)) && (params["filter"] = string(jsonFilter))
-    (!isnothing(ids)) && ( params["ids"] = true )
     uri = URI(parse(URI,"$(cc.host)/objects/"), query=params)
     return _json(check_response(HTTP.get(uri, auth(cc); require_ssl_verification = cc.verify, status_exception = false)))
 end
