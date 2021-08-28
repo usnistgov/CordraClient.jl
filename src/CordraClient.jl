@@ -256,14 +256,16 @@ function update_object(
     (!isnothing(obj_type)) && (params["type"] = obj_type)
     dryRun && (params["dryRun"] = true)
     (!isnothing(jsonPointer)) && (params["jsonPointer"] = jsonPointer)
+    (!isnothing(payloads)) && (params["full"] = true)
 
     uri = URI(parse(URI,"$(cc.host)/objects/$obj_id"), query=params)
     if !isnothing(payloads) #multi-part request
+        (!isnothing(jsonPointer)) && error("Cannot specify jsonPointer and payloads")
         # Construct the body
         if !isnothing(obj_json)
-            data = Dict{String, Any}( "content" => JSON.json(obj_json)) # keep original object JSON if one is not provided
+            data = Dict{String, Any}( "content" => JSON.json(obj_json)) 
         else
-            data = Dict{String, Any}( "content" => JSON.json(_json(read_object(cc, obj_id))))
+            data = Dict{String, Any}( "content" => JSON.json(_json(read_object(cc, obj_id)))) # keep original object JSON if one is not provided
         end
         (!isnothing(acls)) && (data["acl"] = JSON.json(acls)) 
         for (x,y) in payloads
@@ -310,10 +312,14 @@ function delete_object(
     r = _json(check_response(HTTP.delete(uri, auth(cc); require_ssl_verification = cc.verify, status_exception = false)))
     if isempty(r) # test this. I cannot come up with a case where this would not work
         if isnothing(jsonPointer)
-            return "Succesfully deleted object with id $obj_id"
+            println("Succesfully deleted object with id $obj_id")
+            return r
         else
-            return "Succesfully deleted $jsonPointer from object with id $obj_id"
+            println("Succesfully deleted $jsonPointer from object with id $obj_id")
+            return r
         end
+    else
+        return r
     end
         
 end
@@ -336,7 +342,13 @@ function delete_payload(
     params = Dict{String, Any}()
     params["payload"] = payload
     uri = URI(parse(URI,"$(cc.host)/objects/$obj_id"), query=params) 
-    return _json(check_response(HTTP.delete(uri, auth(cc); require_ssl_verification = cc.verify, status_exception = false)))
+    r = _json(check_response(HTTP.delete(uri, auth(cc); require_ssl_verification = cc.verify, status_exception = false)))
+    if isempty(r) # test this. I cannot come up with a case where this would not work
+        println("Succesfully deleted $payload from object with id $obj_id")
+        return r
+    else
+        return r
+    end
 end
 
 """ 
