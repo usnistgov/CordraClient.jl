@@ -1,6 +1,7 @@
 using CordraClient
 using Test
 using HTTP
+using JSON
 
 @testset "CordraClient.jl" begin
 
@@ -30,11 +31,15 @@ using HTTP
             update_object(cc, "/schemas/debug", obj_json = Dict{String,Any}())
         end
         @test create_object(cc, test_name, test_object, type, dryRun = true)["Integer"] == 55
+        @test create_object(cc, test_name, test_object, type, full = true, dryRun = true)["content"] == test_object
+        @test create_object(cc, test_name, test_object, type, acls = my_acls, dryRun = true)["content"] == test_object
         @test find_object(cc, "id:\"$test_name\"")["size"]==0
         @test create_object(cc, test_name, test_object, type, dryRun = true, payloads = ["TextFile" => [ "sample_file.txt", open(joinpath(path, "resources", "sample.txt"))]])["Integer"] == 55
         @test find_object(cc, "id:\"$test_name\"")["size"]==0
         @test create_object(cc, test_name, test_object, type, acls = my_acls, payloads = ["TextFile" => [ "sample_file.txt", open(joinpath(path, "resources", "sample.txt"))]])["id"] == "test/testing"
         @test find_object(cc, "id:\"$test_name\"")["size"]==1
+        @test update_object(cc, test_name, obj_json = Dict(["testing" => "update"]), dryRun = true) == Dict(["testing" => "update"])
+        @test JSON.parse(String(copy(read_object(cc, test_name)))) == test_object
         @test String(read_object(cc, test_name, jsonPointer ="/Number")) == "2.093482"
         @test read_payload_info(cc, test_name)[1]["size"] in (65,  66) # *NIX vs Windows
         @test String(read_payload(cc, test_name, "TextFile")) in ("This is a sample file to be uploaded as a payload.\r\nJust a sample.", "This is a sample file to be uploaded as a payload.\nJust a sample.") # *NIX vs Windows
@@ -57,8 +62,26 @@ using HTTP
             delete_object(cc, id)
         end
         @test find_object(cc, "/Number:2.093482")["size"] == 1
+        @test_throws HTTP.ExceptionRequest.StatusError CordraConnection(cc.host, cc.username, "thisisclearlynotyourpassword", verify = false)
+        try
+            read_object(cc, "notarealid")
+        catch e
+            @test e.msg == "404 Not Found"        
+        end
+        @test JSON.parse(String(copy(read_object(cc, test_name, jsonPointer = "Wrong"))))["message"] == "Invalid JSON Pointer Wrong"
+        try
+            read_object(cc, test_name, jsonPointer = "/Wrong")
+        catch e
+            @test e.msg == "404 Not Found"   
+        end
         delete_object(cc, test_name)
         @assert find_object(cc, "id:\"$test_name\"")["size"]==0
+        global test_cordra_connection = cc
+    end
+    try
+        read_object(test_cordra_connection, "notarealid")
+    catch e
+        @test e.msg == "401 Unauthorized"
     end
 end
 

@@ -40,8 +40,7 @@ struct CordraConnection #suggestion: username
             ["Content-type" => "application/json"], 
             JSON.json(auth_json), 
             require_ssl_verification = verify, 
-            status_exception = true,
-            verbose = 2 # question
+            status_exception = true # question
         )))
         new(host, r["username"], r["access_token"], verify)
     end
