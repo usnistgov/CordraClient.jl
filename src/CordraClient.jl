@@ -85,7 +85,7 @@ auth(cc::CordraConnection) = ["Authorization" => "Bearer $(cc.token)"]
 # Checks for errors and only returns the response.body if there are none
 function check_response(response)
     if response.status > 400
-        (!isempty(response.body)) && @show _json(response.body)["message"]
+        (!isempty(response.body)) && println("CordraClient Error Message: "*_json(response.body)["message"])
         error(string(copy(response.status)) *" "* HTTP.Messages.statustext(response.status))
     end
     response.body
@@ -275,18 +275,19 @@ function update_object(
         body = HTTP.Form(data; boundary = "cordra") #specify boundary
         #HTTP issue: need to specify boundary
         headers = ["Content-Type" => "multipart/form-data; boundary=cordra", auth(cc)... ]
-        return _json(check_response(HTTP.put(uri, headers, body; require_ssl_verification = cc.verify, status_exception = false)))
+        r = _json(check_response(HTTP.put(uri, headers, body; require_ssl_verification = cc.verify, status_exception = false)))
     elseif !isnothing(acls) #just update ACLs
         uri = URI(parse(URI,"$(cc.host)/acls/$obj_id"), query=params)
-        return _json(check_response(HTTP.put(uri, auth(cc), JSON.json(acls); require_ssl_verification = cc.verify, status_exception = false)))
+        r = _json(check_response(HTTP.put(uri, auth(cc), JSON.json(acls); require_ssl_verification = cc.verify, status_exception = false)))
     else #just update object
         isnothing(obj_json) && error("obj_json is required")
         if !isnothing(jsonPointer)
-            return Dict([string(strip(jsonPointer, ['/'])) => _json(check_response(HTTP.put(uri, auth(cc), JSON.json(obj_json); require_ssl_verification = cc.verify, status_exception = false)))])
+            r = Dict([string(strip(jsonPointer, ['/'])) => _json(check_response(HTTP.put(uri, auth(cc), JSON.json(obj_json); require_ssl_verification = cc.verify, status_exception = false)))])
         else
-            return _json(check_response(HTTP.put(uri, auth(cc), JSON.json(obj_json); require_ssl_verification = cc.verify, status_exception = false)))
+            r = _json(check_response(HTTP.put(uri, auth(cc), JSON.json(obj_json); require_ssl_verification = cc.verify, status_exception = false)))
         end
     end
+    return r
 end
 
 """
@@ -314,15 +315,11 @@ function delete_object(
     if isempty(r) # test this. I cannot come up with a case where this would not work
         if isnothing(jsonPointer)
             println("Succesfully deleted object with id $obj_id")
-            return r
         else
             println("Succesfully deleted $jsonPointer from object with id $obj_id")
-            return r
         end
-    else
-        return r
     end
-        
+    return r
 end
 
 """
@@ -346,10 +343,8 @@ function delete_payload(
     r = _json(check_response(HTTP.delete(uri, auth(cc); require_ssl_verification = cc.verify, status_exception = false)))
     if isempty(r) # test this. I cannot come up with a case where this would not work
         println("Succesfully deleted $payload from object with id $obj_id")
-        return r
-    else
-        return r
     end
+    return r
 end
 
 """ 
