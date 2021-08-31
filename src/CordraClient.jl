@@ -40,7 +40,7 @@ struct CordraConnection #suggestion: username
             ["Content-type" => "application/json"], 
             JSON.json(auth_json), 
             require_ssl_verification = verify, 
-            status_exception = true # question
+            status_exception = true
         )))
         new(host, r["username"], r["access_token"], verify)
     end
@@ -94,7 +94,7 @@ end
 """
     create_object(
         cc::CordraConnection,
-        obj_id::AbstractString,        # the object's ID
+        handle::AbstractString,        # the object's ID
         obj_json::Dict{String,<:Any},  # the object's JSON data.
         obj_type::AbstractString;      # the object's data schema name.
         suffix=nothing,
@@ -119,10 +119,10 @@ or similar where `io` is an `IOStream`.
 """
 function create_object(
     cc::CordraConnection,
-    obj_id::AbstractString,
     obj_json::Dict{String,<:Any},
     obj_type::AbstractString;
-    suffix = nothing, # I don't know what this does????
+    handle = nothing,
+    suffix = nothing,
     dryRun::Bool = false,
     full::Bool = false,
     payloads = nothing,
@@ -134,7 +134,7 @@ function create_object(
     # Set up uri with params
     params = Dict{String, Any}(
         "type" => obj_type, 
-        "handle" => obj_id
+        "handle" => handle
     )
     (!isnothing(suffix)) && (params["suffix"] = suffix)
     dryRun && (params["dryRun"] = true)
@@ -155,7 +155,7 @@ end
 """ 
     read_object(
         cc::CordraConnection,
-        obj_id;                 # The object ID
+        handle;                 # The object ID
         jsonPointer=nothing,    # An optional name of an item in the object
         jsonFilter=nothing,     # An optional filter to items in the object
         full=false              # Return meta-data in addition to object data?
@@ -168,11 +168,10 @@ Converting the result into an object of the appropriate type depends on the obje
 a `Vector{UInt8}` which can be converted to:
     * String -> String(copy(res))
     * Dict{String, Any} from JSON -> JSON.parse(String(copy(res)))
-    * Float64, Int32, etc -> reinterpret(Float64, res) 
 """
-function read_object( #Discuss interpretations
+function read_object(
     cc::CordraConnection,
-    obj_id::AbstractString;
+    handle::AbstractString;
     jsonPointer=nothing,
     jsonFilter=nothing,
     full=false
@@ -180,7 +179,7 @@ function read_object( #Discuss interpretations
     params = Dict{String, Any}("full" => full)
     (!isnothing(jsonPointer)) && (params["jsonPointer"] = jsonPointer)
     (!isnothing(jsonFilter)) && (params["jsonFilter"] = string(jsonFilter))
-    uri = URI(parse(URI,"$(cc.host)/objects/$obj_id"), query=params)
+    uri = URI(parse(URI,"$(cc.host)/objects/$handle"), query=params)
     return check_response(HTTP.get(uri, auth(cc); require_ssl_verification = cc.verify, status_exception = false))
 end
 
@@ -188,16 +187,16 @@ end
 """ 
     read_payload_info(
         cc::CordraConnection,
-        obj_id
+        handle
     )
 
 Retrieve a Cordra object payload names by identifier.
 """
 function read_payload_info(
     cc::CordraConnection,
-    obj_id
+    handle::AbstractString
     )
-    uri = URI(parse(URI,"$(cc.host)/objects/$obj_id"), query=Dict{String, Any}("full" => true))
+    uri = URI(parse(URI,"$(cc.host)/objects/$handle"), query=Dict{String, Any}("full" => true))
     r = _json(check_response(HTTP.get(uri, auth(cc); require_ssl_verification = cc.verify, status_exception = false)))
     return r["payloads"]
 end
@@ -205,7 +204,7 @@ end
 """ 
     read_payload(
         cc::CordraConnection,
-        obj_id,
+        handle,
         payload
         )
 
@@ -213,17 +212,17 @@ Retrieve a Cordra object payload by identifier and payload name.
 """
 function read_payload(
     cc::CordraConnection,
-    obj_id::AbstractString,
+    handle::AbstractString,
     payload::AbstractString
 )::Vector{UInt8}
-    uri = URI(parse(URI,"$(cc.host)/objects/$obj_id"), query=Dict{String, Any}( "payload" => payload))
+    uri = URI(parse(URI,"$(cc.host)/objects/$handle"), query=Dict{String, Any}( "payload" => payload))
     return check_response(HTTP.get(uri, auth(cc); require_ssl_verification = cc.verify, status_exception = false))
 end
 
 """
     update_object(
         cc::CordraConnection,
-        obj_id;
+        handle;
         obj_json=nothing,
         jsonPointer=nothing,
         obj_type=nothing,
@@ -240,7 +239,7 @@ See the create_object(...) documentation for details on `payloads`
 """
 function update_object(
     cc::CordraConnection,
-    obj_id::AbstractString;
+    handle::AbstractString;
     obj_json=nothing,
     jsonPointer=nothing,
     obj_type=nothing,
@@ -259,14 +258,14 @@ function update_object(
     (!isnothing(jsonPointer)) && (params["jsonPointer"] = jsonPointer)
     (!isnothing(payloads)) && (params["full"] = true)
 
-    uri = URI(parse(URI,"$(cc.host)/objects/$obj_id"), query=params)
+    uri = URI(parse(URI,"$(cc.host)/objects/$handle"), query=params)
     if !isnothing(payloads) #multi-part request
         (!isnothing(jsonPointer)) && error("Cannot specify jsonPointer and payloads")
         # Construct the body
         if !isnothing(obj_json)
             data = Dict{String, Any}( "content" => JSON.json(obj_json)) 
         else
-            data = Dict{String, Any}( "content" => JSON.json(_json(read_object(cc, obj_id)))) # keep original object JSON if one is not provided
+            data = Dict{String, Any}( "content" => JSON.json(_json(read_object(cc, handle)))) # keep original object JSON if one is not provided
         end
         (!isnothing(acls)) && (data["acl"] = JSON.json(acls)) 
         for (x,y) in payloads
@@ -277,7 +276,7 @@ function update_object(
         headers = ["Content-Type" => "multipart/form-data; boundary=cordra", auth(cc)... ]
         r = _json(check_response(HTTP.put(uri, headers, body; require_ssl_verification = cc.verify, status_exception = false)))
     elseif !isnothing(acls) #just update ACLs
-        uri = URI(parse(URI,"$(cc.host)/acls/$obj_id"), query=params)
+        uri = URI(parse(URI,"$(cc.host)/acls/$handle"), query=params)
         r = _json(check_response(HTTP.put(uri, auth(cc), JSON.json(acls); require_ssl_verification = cc.verify, status_exception = false)))
     else #just update object
         isnothing(obj_json) && error("obj_json is required")
@@ -293,7 +292,7 @@ end
 """
     delete_object(
         cc::CordraConnection,
-        obj_id::AbstractString;   # The object ID
+        handle::AbstractString;   # The object ID
         jsonPointer=nothing       
         )
 If `jsonPointer` is specified, instead of deleting the object, only the content at the specified JSON pointer will be deleted (including the pointer itself).
@@ -302,30 +301,32 @@ Delete a Cordra Object.
 """
 function delete_object(
     cc::CordraConnection,
-    obj_id::AbstractString;
+    handle::AbstractString;
     jsonPointer=nothing
 )
     params = Dict{String, Any}()
     if !isnothing(jsonPointer)
-        read_object(cc, obj_id, jsonPointer = jsonPointer) # Throws error if jsonPointer not found
+        read_object(cc, handle, jsonPointer = jsonPointer) # Throws error if jsonPointer not found
         params["jsonPointer"] = jsonPointer
     end
-    uri = URI(parse(URI,"$(cc.host)/objects/$obj_id"), query=params)
+    uri = URI(parse(URI,"$(cc.host)/objects/$handle"), query=params)
     r = _json(check_response(HTTP.delete(uri, auth(cc); require_ssl_verification = cc.verify, status_exception = false)))
-    if isempty(r) # test this. I cannot come up with a case where this would not work
+    t = isempty(r)
+    if t
+        return t
+    else
         if isnothing(jsonPointer)
-            println("Succesfully deleted object with id $obj_id")
+            error("There was an error deleting $handle")
         else
-            println("Succesfully deleted $jsonPointer from object with id $obj_id")
+            error("There was an error deleting $jsonPointer from $handle")
         end
     end
-    return r
 end
 
 """
     delete_payload(
         cc::CordraConnection,
-        obj_id,              # The object ID
+        handle,              # The object ID
         payload              # The name of the payload to delete
         )
 
@@ -333,18 +334,20 @@ Delete a payload from a Cordra object.
 """
 function delete_payload(
     cc::CordraConnection,
-    obj_id::AbstractString,
+    handle::AbstractString,
     payload::AbstractString
 )
-    read_payload(cc, obj_id, payload) # Throws error if payload not found
+    read_payload(cc, handle, payload) # Throws error if payload not found
     params = Dict{String, Any}()
     params["payload"] = payload
-    uri = URI(parse(URI,"$(cc.host)/objects/$obj_id"), query=params) 
+    uri = URI(parse(URI,"$(cc.host)/objects/$handle"), query=params) 
     r = _json(check_response(HTTP.delete(uri, auth(cc); require_ssl_verification = cc.verify, status_exception = false)))
-    if isempty(r) # test this. I cannot come up with a case where this would not work
-        println("Succesfully deleted $payload from object with id $obj_id")
+    t = isempty(r)
+    if t
+        return t
+    else
+        error("There was an error deleting payload $payload from $handle")
     end
-    return r
 end
 
 """ 
