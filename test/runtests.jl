@@ -74,8 +74,41 @@ using JSON
         catch e
             @test e.msg == "404 Not Found"   
         end
+        try
+            read_payload(cc, test_name, "NotARealPayload")
+        catch e
+            @test e.msg == "404 Not Found"
+        end
+        try
+            delete_payload(cc, test_name, "NotARealPayload")
+        catch e
+            @test e.msg == "404 Not Found"
+        end
+        try
+            update_object(cc, test_name, jsonPointer = "/String", payloads = Dict("Array" => ("Array",IOBuffer(reinterpret(UInt8, collect(1.0:1.0:100.0))))))
+        catch e
+            @test e.msg == "Cannot specify jsonPointer and payloads"
+        end
+        try
+            update_object(cc, test_name)
+        catch e
+            @test e.msg == "obj_json is required"
+        end
+        try
+            delete_object(cc, test_name, jsonPointer = "/WrongPointer")
+        catch e
+            @test e.msg == "404 Not Found"
+        end
+        delete_object(cc, test_name, jsonPointer = "/String")
+        @test JSON.parse(String(copy(read_object(cc, test_name)))) == Dict(["Number" => 2.093482, "Integer" => 326])
+        @test update_object(cc, test_name, acls = [])["message"] == "Invalid ACL format"
+        update_object(cc, test_name, acls = Dict(["readers" => [], "writers" => []]))
+        @test JSON.parse(String(copy(read_object(cc, test_name, full = true))))["acl"] == Dict(["readers" => [], "writers" => []])
         delete_object(cc, test_name)
         @assert find_object(cc, "id:\"$test_name\"")["size"]==0
+        @test_throws MethodError CordraConnection("https://localhost:8443", verify = false)
+        @test read_token(cc)["active"] == true
+        @test read_token(cc)["username"] == cc.username
         global test_cordra_connection = cc
     end
     try
