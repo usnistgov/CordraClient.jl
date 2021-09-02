@@ -97,7 +97,8 @@ end
         handle::AbstractString,        # the object's ID
         obj_json::Dict{String,<:Any},  # the object's JSON data.
         obj_type::AbstractString;      # the object's data schema name.
-        suffix=nothing,
+        handle::AbstractString,        # the object's ID including Cordra's prefix <prefix/id>
+        suffix=nothing,                # the object's ID
         dryRun = false,                # Don't actually add the item
         full = false,                  # Return meta-data in addition to object data
         payloads = nothing,            # payload data (like binary or file data)
@@ -133,10 +134,10 @@ function create_object(
     _mp(y::HTTP.Multipart) = y
     # Set up uri with params
     params = Dict{String, Any}(
-        "type" => obj_type, 
-        "handle" => handle
+        "type" => obj_type
     )
     (!isnothing(suffix)) && (params["suffix"] = suffix)
+    (!isnothing(handle)) && (params["handle"] = handle)
     dryRun && (params["dryRun"] = true)
     (full || (!isnothing(acls))) && (params["full"] = true)
     uri = URI(parse(URI,"$(cc.host)/objects"), query=params)
@@ -187,7 +188,7 @@ end
 """ 
     read_payload_info(
         cc::CordraConnection,
-        handle
+        handle::AbstractString
     )
 
 Retrieve a Cordra object payload names by identifier.

@@ -30,13 +30,13 @@ using JSON
         if find_object(cc, "/debug")["size"]==0
             update_object(cc, "/schemas/debug", obj_json = Dict{String,Any}())
         end
-        @test create_object(cc, test_name, test_object, type, dryRun = true)["Integer"] == 55
-        @test create_object(cc, test_name, test_object, type, full = true, dryRun = true)["content"] == test_object
-        @test create_object(cc, test_name, test_object, type, acls = my_acls, dryRun = true)["content"] == test_object
+        @test create_object(cc, test_object, type, dryRun = true, handle = test_name)["Integer"] == 55
+        @test create_object(cc, test_object, type, full = true, dryRun = true, handle = test_name)["content"] == test_object
+        @test create_object(cc, test_object, type, acls = my_acls, dryRun = true, handle = test_name)["content"] == test_object
         @test find_object(cc, "id:\"$test_name\"")["size"]==0
-        @test create_object(cc, test_name, test_object, type, dryRun = true, payloads = ["TextFile" => [ "sample_file.txt", open(joinpath(path, "resources", "sample.txt"))]])["Integer"] == 55
+        @test create_object(cc, test_object, type, dryRun = true, handle = test_name, payloads = ["TextFile" => [ "sample_file.txt", open(joinpath(path, "resources", "sample.txt"))]])["Integer"] == 55
         @test find_object(cc, "id:\"$test_name\"")["size"]==0
-        @test create_object(cc, test_name, test_object, type, acls = my_acls, payloads = ["TextFile" => [ "sample_file.txt", open(joinpath(path, "resources", "sample.txt"))]])["id"] == "test/testing"
+        @test create_object(cc, test_object, type, acls = my_acls, handle = test_name, payloads = ["TextFile" => [ "sample_file.txt", open(joinpath(path, "resources", "sample.txt"))]])["id"] == "test/testing"
         @test find_object(cc, "id:\"$test_name\"")["size"]==1
         @test update_object(cc, test_name, obj_json = Dict(["testing" => "update"]), dryRun = true) == Dict(["testing" => "update"])
         @test JSON.parse(String(copy(read_object(cc, test_name)))) == test_object
@@ -49,11 +49,59 @@ using JSON
         @test String(read_object(cc, test_name, jsonPointer ="/Integer")) == "326"
         update_object(cc, test_name, payloads = [ "Array" => HTTP.Multipart("Array", IOBuffer(reinterpret(UInt8, collect(1.0:1.0:100.0))), "application/octet-stream")])
         @test length(read_payload_info(cc, test_name)) == 3
-        @test isempty(delete_payload(cc, test_name, "TestingNewFile"))
+        @test delete_payload(cc, test_name, "TestingNewFile")
         @test length(read_payload_info(cc, test_name)) == 2
         @test String(read_object(cc, test_name, jsonPointer ="/Number")) == "2.093482"
+        # Create test users. NEED TO DELETE IF FOUND AND THEN DELETE IN END
+        create_object(cc, Dict(["username" => "testuser", "password" => "thisisatestpassword"]), "User", suffix = "testuser")
+        test_cc = CordraConnection(cc.host, "testuser", "thisisatestpassword", verify = cc.verify)
+        try
+            create_object(test_cc, Dict(["username" => "testuser2", "password" => "thisisatestpassword"]), "User", suffix = "testuser2")
+        catch e
+            @test e.msg == "403 Forbidden"
+        end
+        create_object(cc, Dict(["username" => "testuser2", "password" => "thisisatestpassword"]), "User", suffix = "testuser2")
+        test_cc_2 = CordraConnection(cc.host, "testuser2", "thisisatestpassword", verify = cc.verify)
+        @test JSON.parse(String(copy(read_object(cc, test_name, full = true))))["acl"] == my_acls
+        update_object(cc, test_name, acls = ["readers" => [], "writers" => []])
+        try
+            read_object(test_cc, test_name)
+        catch e
+            @test e.msg == "403 Forbidden"
+        end
+        try
+            read_object(test_cc_2, test_name)
+        catch e
+            @test e.msg == "403 Forbidden"
+        end
+        @test String(copy(read_object(cc, test_name, jsonPointer = "/Number"))) == "2.093482"
+        update_object(cc, test_name, acls = ["readers" => ["test/testuser"], "writers" => []])
+        @test String(copy(read_object(test_cc, test_name, jsonPointer = "/Number"))) == "2.093482"
+        try
+            read_object(test_cc_2, test_name)
+        catch e
+            @test e.msg == "403 Forbidden"
+        end
+        try
+            update_object(test_cc, test_name, acls = ["readers" => ["test/testuser"], "writers" => ["test/testuser"]])
+        catch e
+            @test e.msg == "403 Forbidden"
+        end
+        update_object(cc, test_name, acls = ["readers" => ["test/testuser"], "writers" => ["test/testuser2"]])
+        @test String(copy(read_object(test_cc_2, test_name, jsonPointer = "/Number"))) == "2.093482"
+        update_object(test_cc_2, test_name, acls = ["readers" => [], "writers" => []])
+        try
+            read_object(test_cc, test_name)
+        catch e
+            @test e.msg == "403 Forbidden"
+        end
+        try
+            read_object(test_cc_2, test_name)
+        catch e
+            @test e.msg == "403 Forbidden"
+        end
         for id in multiple_ids
-            create_object(cc, id, test_object, type, acls = my_acls)
+            create_object(cc, test_object, type, acls = my_acls, handle = id)
         end
         @test find_object(cc, "/Number:2.093482")["size"] == 10
         @test length(find_object(cc, "/Number:2.093482", ids = true)["results"]) == 10
