@@ -54,7 +54,7 @@ using JSON
         @test String(read_object(cc, test_name, jsonPointer ="/Number")) == "2.093482"
         # Create test users
         for id in ["test/testuser", "test/testuser2"]
-            if find_object(cc, id)["size"]==1
+            if find_object(cc, "id:$id")["size"]==1
                 delete_object(cc, id)
                 @assert find_object(cc, id)==0
             end
