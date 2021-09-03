@@ -52,7 +52,13 @@ using JSON
         @test delete_payload(cc, test_name, "TestingNewFile")
         @test length(read_payload_info(cc, test_name)) == 2
         @test String(read_object(cc, test_name, jsonPointer ="/Number")) == "2.093482"
-        # Create test users. NEED TO DELETE IF FOUND AND THEN DELETE IN END
+        # Create test users
+        for id in ["test/testuser", "test/testuser2"]
+            if find_object(cc, id)["size"]==1
+                delete_object(cc, id)
+                @assert find_object(cc, id)==0
+            end
+        end
         create_object(cc, Dict(["username" => "testuser", "password" => "thisisatestpassword"]), "User", suffix = "testuser")
         test_cc = CordraConnection(cc.host, "testuser", "thisisatestpassword", verify = cc.verify)
         try
@@ -99,6 +105,12 @@ using JSON
             read_object(test_cc_2, test_name)
         catch e
             @test e.msg == "403 Forbidden"
+        end
+        for id in ["test/testuser", "test/testuser2"]
+            delete_object(cc, id)
+        end
+        for id in ["test/testuser", "test/testuser2"]
+            @test find_object(cc, "id:$id")["size"]==0
         end
         for id in multiple_ids
             create_object(cc, test_object, type, acls = my_acls, handle = id)
