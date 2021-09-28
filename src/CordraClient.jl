@@ -272,10 +272,8 @@ function update_object(
         for (x,y) in payloads
             data[x] = _mp(y)
         end
-        body = HTTP.Form(data; boundary = "cordra") #specify boundary
-        #HTTP issue: need to specify boundary
-        headers = ["Content-Type" => "multipart/form-data; boundary=cordra", auth(cc)... ]
-        r = _json(check_response(HTTP.put(uri, headers, body; require_ssl_verification = cc.verify, status_exception = false)))
+        body = HTTP.Form(data)
+        r = _json(check_response(HTTP.put(uri, auth(cc), body; require_ssl_verification = cc.verify, status_exception = false)))
     elseif !isnothing(acls) #just update ACLs
         uri = URI(parse(URI,"$(cc.host)/acls/$handle"), query=params)
         r = _json(check_response(HTTP.put(uri, auth(cc), JSON.json(acls); require_ssl_verification = cc.verify, status_exception = false)))
