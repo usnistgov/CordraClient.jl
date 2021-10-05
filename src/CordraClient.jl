@@ -19,16 +19,38 @@ export delete_payload
 
 
 """
+    CordraConnection(
+        host::AbstractString,
+        username::AbstractString,
+        password::Union{Nothing, AbstractString}=nothing; 
+        verify::Bool=true,
+        full::Bool=false
+    )
+
+If no `password` is specified - the argument can be omitted - the user will be prompted to enter one.
+
 A `CordraConnection` uses a username and password to construct a token which
 will be used to access a Cordra host.
+
+It can also be used within a context manager along with a JSON config file containing `host`, `username`, and `password`:
+
+    open(CordraConnection, <path to config file>) do cc
+        <execute commands here with cc as the CordraConnection object>
+    end
+Note that this `CordraConnection` will only be valid inside the context manager: the `token` is deleted from Cordra once Julia closes the context manager.
 """
-struct CordraConnection #suggestion: username
+struct CordraConnection
     host::String # URL of host
     username::String # Username
     token::String # Authentication token
     verify::Bool # Require SSL verification?
 
-    function CordraConnection(host::AbstractString, username::AbstractString, password::AbstractString; verify::Bool=true, full::Bool=false)
+    function CordraConnection(host::AbstractString, username::AbstractString, password::Union{Nothing, AbstractString}=nothing; verify::Bool=true, full::Bool=false)
+        if isnothing(password)
+            p = Base.getpass("Password: ")
+            password = read(p, String)
+            Base.shred!(p)
+        end
         auth_json = Dict{String, Any}( 
             "grant_type" => "password",
             "username" => username,
