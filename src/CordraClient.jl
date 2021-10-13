@@ -16,6 +16,7 @@ export delete_object
 export find_object
 export read_token
 export delete_payload
+export @JSON
 
 
 """
@@ -68,7 +69,7 @@ struct CordraConnection
     end
 end
 
-function Base.open(f::Function, ::Type{CordraConnection}, host::AbstractString, username::AbstractString, password::AbstractString; verify::Bool=true, full::Bool=false)
+function Base.open(f::Function, ::Type{CordraConnection}, host::AbstractString, username::AbstractString, password::Union{Nothing, AbstractString}=nothing; verify::Bool=true, full::Bool=false)
     cc = CordraConnection(host, username, password; verify=verify, full=full)
     try
         f(cc)
@@ -82,7 +83,7 @@ end
 # Helper to convert UInt8[] to JSON
 _json(r) = JSON.parse(String(copy(r)))
 
-function Base.open(::Type{CordraConnection}, host::AbstractString, username::AbstractString, password::AbstractString; verify::Bool=true, full::Bool=false)
+function Base.open(::Type{CordraConnection}, host::AbstractString, username::AbstractString, password::Union{Nothing, AbstractString}=nothing; verify::Bool=true, full::Bool=false)
     return CordraConnection(host, username, password, verify=verify, full=full)
 end
 
@@ -104,6 +105,18 @@ end
 
 auth(cc::CordraConnection) = ["Authorization" => "Bearer $(cc.token)"]
 
+
+
+"""
+    @JSON read_object(...)
+Macro to return the object's JSON representation. Equivalent to `JSON.parse(String(copy(read_object(...))))`
+
+When including a single `jsonPointer`, the returned object from Cordra will be parsed by `JSON.parse` to a specific type. 
+"""
+macro JSON(v)
+    return esc( :( JSON.parse(String(copy($v))) ) )
+end
+
 # Checks for errors and only returns the response.body if there are none
 function check_response(response)
     if response.status > 400
@@ -119,12 +132,12 @@ end
         handle::AbstractString,        # the object's ID
         obj_json::Dict{String,<:Any},  # the object's JSON data.
         obj_type::AbstractString;      # the object's data schema name.
-        handle::AbstractString,        # the object's ID including Cordra's prefix <prefix/id>
-        suffix=nothing,                # the object's ID
+        handle = nothing,              # the object's ID including Cordra's prefix <prefix/id>
+        suffix = nothing,              # the object's ID
         dryRun = false,                # Don't actually add the item
         full = false,                  # Return meta-data in addition to object data
         payloads = nothing,            # payload data (like binary or file data)
-        acls = nothing                 # Access control lists as a Dict{String, Any}
+        acls = nothing                 # Access control lists
     )
 
 Create a Cordra database object. 
@@ -139,6 +152,12 @@ Syntax for `payloads`:
     Dict("FileDescription" => HTTP.Multipart("name",io,"mime/type"))
 
 or similar where `io` is an `IOStream`.
+
+Syntax for `acls`:
+
+    Dict("readers" => [<vector containing readers>],
+         "writers" => [<vector containing writers>])
+
 """
 function create_object(
     cc::CordraConnection,
