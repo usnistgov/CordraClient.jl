@@ -47,7 +47,7 @@ struct CordraConnection
 
     function CordraConnection(host::AbstractString, username::AbstractString, password::Union{Nothing, AbstractString}=nothing; verify::Bool=true, full::Bool=false)
         if isnothing(password)
-            p = Base.getpass("Password: ")
+            p = Base.getpass("Password")
             password = read(p, String)
             Base.shred!(p)
         end
