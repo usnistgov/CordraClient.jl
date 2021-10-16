@@ -47,6 +47,10 @@ using JSON
         @test length(read_payload(cc, test_name, "TestingNewFile")) == 15647
         @test update_object(cc, test_name, jsonPointer = "/Integer", obj_json = 326)["Integer"] == 326
         @test String(read_object(cc, test_name, jsonPointer ="/Integer")) == "326"
+        res = read_object(cc, test_name, jsonPointer ="/Integer")
+        @test (@JSON res) == 326
+        res2 = read_object(cc, test_name)
+        @test (@JSON res2) == Dict("String" => "This is a String", "Number" => 2.093482,"Integer" => 326)
         update_object(cc, test_name, payloads = [ "Array" => HTTP.Multipart("Array", IOBuffer(reinterpret(UInt8, collect(1.0:1.0:100.0))), "application/octet-stream")])
         @test length(read_payload_info(cc, test_name)) == 3
         @test delete_payload(cc, test_name, "TestingNewFile")
