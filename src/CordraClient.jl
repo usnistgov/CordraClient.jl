@@ -4,6 +4,7 @@ using HTTP
 using Reexport
 using JSON
 using URIs
+using DataStructures
 
 # The external interface to the CordraClient package
 export CordraConnection
@@ -129,7 +130,6 @@ end
 """
     create_object(
         cc::CordraConnection,
-        handle::AbstractString,        # the object's ID
         obj_json::Dict{String,<:Any},  # the object's JSON data.
         obj_type::AbstractString;      # the object's data schema name.
         handle = nothing,              # the object's ID including Cordra's prefix <prefix/id>
@@ -161,7 +161,7 @@ Syntax for `acls`:
 """
 function create_object(
     cc::CordraConnection,
-    obj_json::Dict{String,<:Any},
+    obj_json::Union{Dict{String,<:Any}, DataStructures.OrderedDict{String, <:Any}},
     obj_type::AbstractString;
     handle = nothing,
     suffix = nothing,
