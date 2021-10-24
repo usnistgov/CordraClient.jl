@@ -2,6 +2,7 @@ using CordraClient
 using Test
 using HTTP
 using JSON
+using DataStructures
 
 @testset "CordraClient.jl" begin
 
@@ -16,6 +17,12 @@ using JSON
     my_acls = Dict(
         "writers" => ["public"],
         "readers" => ["public"]
+    )
+    test_ord_dict = OrderedDict(
+        "First" => "A string",
+        "Second" => 1827,
+        "Third" => 2.857710001,
+        "Fourth" => 29999910
     )
 
     test_name = "test/testing"
@@ -56,6 +63,24 @@ using JSON
         @test delete_payload(cc, test_name, "TestingNewFile")
         @test length(read_payload_info(cc, test_name)) == 2
         @test String(read_object(cc, test_name, jsonPointer ="/Number")) == "2.093482"
+        @testset "OrderedDict" begin
+            if find_object(cc, "id:\"test/ordered\"")["size"]==1
+                delete_object(cc, "test/ordered")
+                @assert find_object(cc, "id:\"test/ordered\"")["size"]==0
+            end
+            @test create_object(cc, test_ord_dict, type, dryRun = true, suffix = "ordered")["Fourth"] == 29999910
+            @test create_object(cc, test_ord_dict, type, full = true, dryRun = true, suffix = "ordered")["content"] == test_ord_dict
+            @test create_object(cc, test_ord_dict, type, acls = my_acls, dryRun = true, suffix = "ordered")["content"] == test_ord_dict
+            @test find_object(cc, "id:\"test/ordered\"")["size"]==0
+            @test create_object(cc, test_ord_dict, type, dryRun = true, suffix = "ordered", payloads = ["TextFile" => [ "sample_file.txt", open(joinpath(path, "resources", "sample.txt"))]])["Third"] == 2.857710001
+            @test find_object(cc, "id:\"test/ordered\"")["size"]==0
+            @test create_object(cc, test_ord_dict, type, acls = my_acls, suffix = "ordered", payloads = ["TextFile" => [ "sample_file.txt", open(joinpath(path, "resources", "sample.txt"))]])["id"] == "test/ordered"
+            @test find_object(cc, "id:\"test/ordered\"")["size"]==1
+            delete_object(cc, "test/ordered")
+            @assert find_object(cc, "id:\"test/ordered\"")["size"]==0
+        end
+
+        # TODO create test for DataFrameRow
         # Create test users
         for id in ["test/testuser", "test/testuser2"]
             if find_object(cc, "id:$id")["size"]==1

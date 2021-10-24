@@ -5,6 +5,7 @@ using Reexport
 using JSON
 using URIs
 using DataStructures
+using DataFrames
 
 # The external interface to the CordraClient package
 export CordraConnection
@@ -130,10 +131,10 @@ end
 """
     create_object(
         cc::CordraConnection,
-        obj_json::Dict{String,<:Any},  # the object's JSON data.
-        obj_type::AbstractString;      # the object's data schema name.
-        handle = nothing,              # the object's ID including Cordra's prefix <prefix/id>
-        suffix = nothing,              # the object's ID
+        obj_json::Union{Dict{String, <:Any}, DataStructures.OrderedDict{String, <:Any}, DataFrameRow},                   # The object's JSON data.
+        obj_type::AbstractString;      # The object's data schema name.
+        handle = nothing,              # The object's ID including Cordra's prefix <prefix/id>
+        suffix = nothing,              # The object's ID
         dryRun = false,                # Don't actually add the item
         full = false,                  # Return meta-data in addition to object data
         payloads = nothing,            # payload data (like binary or file data)
@@ -161,7 +162,7 @@ Syntax for `acls`:
 """
 function create_object(
     cc::CordraConnection,
-    obj_json::Union{Dict{String,<:Any}, DataStructures.OrderedDict{String, <:Any}},
+    obj_json::Union{Dict{String, <:Any}, DataStructures.OrderedDict{String, <:Any}},
     obj_type::AbstractString;
     handle = nothing,
     suffix = nothing,
@@ -194,10 +195,49 @@ function create_object(
     return _json(check_response(HTTP.post(uri, auth(cc), HTTP.Form(data); require_ssl_verification = cc.verify, status_exception = false)))
 end
 
+function create_object(
+    cc::CordraConnection,
+    obj::DataFrameRow,
+    obj_type::AbstractString;
+    handle = nothing,
+    suffix = nothing,
+    dryRun::Bool = false,
+    full::Bool = false,
+    payloads = nothing,
+    acls = nothing
+)::Dict{String, Any}
+    # Interpreting payload
+    _mp(y) = HTTP.Multipart(y...)
+    _mp(y::HTTP.Multipart) = y
+    # Set up uri with params
+    params = Dict{String, Any}(
+        "type" => obj_type
+    )
+    (!isnothing(suffix)) && (params["suffix"] = suffix)
+    (!isnothing(handle)) && (params["handle"] = handle)
+    dryRun && (params["dryRun"] = true)
+    (full || (!isnothing(acls))) && (params["full"] = true)
+    uri = URI(parse(URI,"$(cc.host)/objects"), query=params)
+    # OrderedDict from DataFrameRow
+    n = names(obj)
+    obj_json = OrderedDict(zip(n, map(x -> getproperty(obj, x), n)))
+
+    # Build the data with acl
+    data = Dict{String, Any}( "content" => JSON.json(obj_json))
+    (!isnothing(acls)) && (data["acl"] = JSON.json(acls))
+    if !isnothing(payloads)
+        for (x,y) in payloads
+            data[x] = _mp(y)
+        end
+    end
+    # Post the object
+    return _json(check_response(HTTP.post(uri, auth(cc), HTTP.Form(data); require_ssl_verification = cc.verify, status_exception = false)))
+end
+
 """ 
     read_object(
         cc::CordraConnection,
-        handle;                 # The object ID
+        handle;                 # The object's ID
         jsonPointer=nothing,    # An optional name of an item in the object
         jsonFilter=nothing,     # An optional filter to items in the object
         full=false              # Return meta-data in addition to object data?
@@ -229,7 +269,7 @@ end
 """ 
     read_payload_info(
         cc::CordraConnection,
-        handle::AbstractString
+        handle::AbstractString   # The object's ID
     )
 
 Retrieve a Cordra object payload names by identifier.
@@ -264,7 +304,7 @@ end
 """
     update_object(
         cc::CordraConnection,
-        handle;
+        handle::AbstractString;     # The object's ID
         obj_json=nothing,
         jsonPointer=nothing,
         obj_type=nothing,
@@ -332,7 +372,7 @@ end
 """
     delete_object(
         cc::CordraConnection,
-        handle::AbstractString;   # The object ID
+        handle::AbstractString;   # The object's ID
         jsonPointer=nothing       
         )
 If `jsonPointer` is specified, instead of deleting the object, only the content at the specified JSON pointer will be deleted (including the pointer itself).
@@ -366,7 +406,7 @@ end
 """
     delete_payload(
         cc::CordraConnection,
-        handle,              # The object ID
+        handle,              # The object's ID
         payload              # The name of the payload to delete
         )
 
