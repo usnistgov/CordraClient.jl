@@ -131,7 +131,7 @@ end
 """
     create_object(
         cc::CordraConnection,
-        obj_json::Union{AbstractDict, DataFrameRow},       # The object's JSON data.
+        obj_json::Union{Dict{String, <:Any}, DataStructures.OrderedDict{String, <:Any}, DataFrameRow},                   # The object's JSON data.
         obj_type::AbstractString;      # The object's data schema name.
         handle = nothing,              # The object's ID including Cordra's prefix <prefix/id>
         suffix = nothing,              # The object's ID
@@ -162,7 +162,7 @@ Syntax for `acls`:
 """
 function create_object(
     cc::CordraConnection,
-    obj_json::AsbtractDict,
+    obj_json::Union{Dict{String, <:Any}, DataStructures.OrderedDict{String, <:Any}},
     obj_type::AbstractString;
     handle = nothing,
     suffix = nothing,
