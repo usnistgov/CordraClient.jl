@@ -35,7 +35,8 @@ using DataStructures
             @assert find_object(cc, "id:\"$test_name\"")["size"]==0
         end
         if find_object(cc, "/debug")["size"]==0
-            update_object(cc, "/schemas/debug", obj_json = Dict{String,Any}())
+            create_schema(cc, "debug", Dict{String,Any}())
+            # update_object(cc, "/schemas/debug", obj_json = Dict{String,Any}())
         end
         @test create_object(cc, test_object, type, dryRun = true, handle = test_name)["Integer"] == 55
         @test create_object(cc, test_object, type, full = true, dryRun = true, handle = test_name)["content"] == test_object
