@@ -10,6 +10,7 @@ using DataFrames
 # The external interface to the CordraClient package
 export CordraConnection
 export create_object
+export create_schema
 export read_object
 export read_payload_info
 export read_payload
@@ -25,7 +26,7 @@ export @JSON
     CordraConnection(
         host::AbstractString,
         username::AbstractString,
-        password::Union{Nothing, AbstractString}=nothing; 
+        password::Union{Nothing, AbstractString}=nothing;
         verify::Bool=true,
         full::Bool=false
     )
@@ -54,17 +55,17 @@ struct CordraConnection
             password = read(p, String)
             Base.shred!(p)
         end
-        auth_json = Dict{String, Any}( 
+        auth_json = Dict{String, Any}(
             "grant_type" => "password",
             "username" => username,
             "password" => password
         )
         r = _json(check_response(HTTP.request(
-            "POST", 
-            URI(parse(URI, "$host/auth/token"), query = Dict{String, Any}( "full" => full)), 
-            ["Content-type" => "application/json"], 
-            JSON.json(auth_json), 
-            require_ssl_verification = verify, 
+            "POST",
+            URI(parse(URI, "$host/auth/token"), query = Dict{String, Any}( "full" => full)),
+            ["Content-type" => "application/json"],
+            JSON.json(auth_json),
+            require_ssl_verification = verify,
             status_exception = true
         )))
         new(host, r["username"], r["access_token"], verify)
@@ -96,11 +97,11 @@ end
 
 function Base.close(cc::CordraConnection)
     return HTTP.request(
-            "POST", 
-            "$(cc.host)/auth/revoke", 
-            ["Content-type" => "application/json"], 
-            JSON.json(Dict{String, Any}( "token" => cc.token )), 
-            require_ssl_verification = cc.verify, 
+            "POST",
+            "$(cc.host)/auth/revoke",
+            ["Content-type" => "application/json"],
+            JSON.json(Dict{String, Any}( "token" => cc.token )),
+            require_ssl_verification = cc.verify,
             status_exception = false
     )
 end
@@ -113,7 +114,7 @@ auth(cc::CordraConnection) = ["Authorization" => "Bearer $(cc.token)"]
     @JSON read_object(...)
 Macro to return the object's JSON representation. Equivalent to `JSON.parse(String(copy(read_object(...))))`
 
-When including a single `jsonPointer`, the returned object from Cordra will be parsed by `JSON.parse` to a specific type. 
+When including a single `jsonPointer`, the returned object from Cordra will be parsed by `JSON.parse` to a specific type.
 """
 macro JSON(v)
     return esc( :( JSON.parse(String(copy($v))) ) )
@@ -141,9 +142,9 @@ end
         acls = nothing                 # Access control lists
     )
 
-Create a Cordra database object. 
+Create a Cordra database object.
 
-Syntax for `payloads`: 
+Syntax for `payloads`:
 
     ["FileDescription" => HTTP.Multipart("name",io,"mime/type")]
     ["FileDescription" => ("name",io,"mime/type")]
@@ -234,7 +235,26 @@ function create_object(
     return _json(check_response(HTTP.post(uri, auth(cc), HTTP.Form(data); require_ssl_verification = cc.verify, status_exception = false)))
 end
 
-""" 
+"""
+    create_schema(
+        cc::CordraConnection,
+        obj_type::AbstractString,      # The schema name.
+        obj_json::AbstractDict,        # The schema's JSON data.
+    )
+
+Create a Cordra schema object.
+
+"""
+function create_schema(
+    cc::CordraConnection,
+    obj_type::AbstractString,
+    obj_json::AbstractDict,
+)::Dict{String, Any}
+    uri = URI(parse(URI,"$(cc.host)/schemas/$(obj_type)"))
+    return _json(check_response(HTTP.put(uri, auth(cc), obj_json, require_ssl_verification = cc.verify, status_exception = false)))
+end
+
+"""
     read_object(
         cc::CordraConnection,
         handle;                 # The object's ID
@@ -266,7 +286,7 @@ function read_object(
 end
 
 
-""" 
+"""
     read_payload_info(
         cc::CordraConnection,
         handle::AbstractString   # The object's ID
@@ -283,7 +303,7 @@ function read_payload_info(
     return r["payloads"]
 end
 
-""" 
+"""
     read_payload(
         cc::CordraConnection,
         handle,
@@ -345,11 +365,11 @@ function update_object(
         (!isnothing(jsonPointer)) && error("Cannot specify jsonPointer and payloads")
         # Construct the body
         if !isnothing(obj_json)
-            data = Dict{String, Any}( "content" => JSON.json(obj_json)) 
+            data = Dict{String, Any}( "content" => JSON.json(obj_json))
         else
             data = Dict{String, Any}( "content" => JSON.json(_json(read_object(cc, handle)))) # keep original object JSON if one is not provided
         end
-        (!isnothing(acls)) && (data["acl"] = JSON.json(acls)) 
+        (!isnothing(acls)) && (data["acl"] = JSON.json(acls))
         for (x,y) in payloads
             data[x] = _mp(y)
         end
@@ -373,7 +393,7 @@ end
     delete_object(
         cc::CordraConnection,
         handle::AbstractString;   # The object's ID
-        jsonPointer=nothing       
+        jsonPointer=nothing
         )
 If `jsonPointer` is specified, instead of deleting the object, only the content at the specified JSON pointer will be deleted (including the pointer itself).
 
@@ -420,7 +440,7 @@ function delete_payload(
     read_payload(cc, handle, payload) # Throws error if payload not found
     params = Dict{String, Any}()
     params["payload"] = payload
-    uri = URI(parse(URI,"$(cc.host)/objects/$handle"), query=params) 
+    uri = URI(parse(URI,"$(cc.host)/objects/$handle"), query=params)
     r = _json(check_response(HTTP.delete(uri, auth(cc); require_ssl_verification = cc.verify, status_exception = false)))
     t = isempty(r)
     if t
@@ -430,7 +450,7 @@ function delete_payload(
     end
 end
 
-""" 
+"""
     find_object(
         cc::CordraConnection,
         query::AbstractString;
@@ -438,9 +458,9 @@ end
         jsonFilter=nothing,   # An optional filter to items in the object
         full::Bool=false,     # Return meta-data in addition to object data?
         pageNum::Int=0,       # The desired results page number. 0 is the first page
-        pageSize::Int=10      
+        pageSize::Int=10
         )
-    
+
 `pageSize` defines the number of results per page. If negative no limit. If 0 no results are returned, only the size (number of hits).
 
 Find a Cordra object by query.
@@ -454,7 +474,7 @@ function find_object(
     pageNum::Int=0,
     pageSize::Int=10
 )
-    params = Dict{String, Any}( 
+    params = Dict{String, Any}(
         "query" => query,
         "ids" => ids,
         "full" => full,
@@ -466,7 +486,7 @@ function find_object(
     return _json(check_response(HTTP.get(uri, auth(cc); require_ssl_verification = cc.verify, status_exception = false))) #not working well
 end
 
-""" 
+"""
     read_token( cc::CordraConnection; full::Bool=false)
 
 Get the properties ("userId", "active", "username" etc) associated with the current authentication token in `cc`.
@@ -478,7 +498,7 @@ function read_token(
     params = Dict{String, Any}("full" => full)
     auth_json = Dict{String, Any}("token" => cc.token)
     uri = URI(parse(URI,"$(cc.host)/auth/introspect"), query = params)
-    return _json(check_response(HTTP.request("POST", uri, 
+    return _json(check_response(HTTP.request("POST", uri,
         ["Content-type" => "application/json"], JSON.json(auth_json), require_ssl_verification = cc.verify, status_exception = false)))
 end
 
