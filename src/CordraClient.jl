@@ -248,7 +248,7 @@ Create a Cordra schema object.
 function create_schema(
     cc::CordraConnection,
     obj_type::AbstractString,
-    obj_json::AbstractDict,
+    obj_json::Union{AbstractDict, AbstractString},
 )::Dict{String, Any}
     uri = URI(parse(URI,"$(cc.host)/schemas/$(obj_type)"))
     return _json(check_response(HTTP.put(uri, auth(cc), obj_json, require_ssl_verification = cc.verify, status_exception = false)))
