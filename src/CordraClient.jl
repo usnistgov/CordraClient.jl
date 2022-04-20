@@ -105,8 +105,7 @@ function Base.close(cc::CordraConnection)
     )
 end
 
-# Helper to convert UInt8[] to JSON
-_json(r::CordraResponse) = JSON.parse(String(copy(r.body)))
+
 
 auth(cc::CordraConnection) = ["Authorization" => "Bearer $(cc.token)"]
 
@@ -145,10 +144,14 @@ struct CordraObject
         if full
             new(body, body["id"])
         else
+            
             new(body["content"], body["id"])
         end
     end
 end
+
+# Helper to convert UInt8[] to JSON
+_json(r::CordraResponse) = JSON.parse(String(copy(r.body)))
 
 """
     @JSON read_object(...)
