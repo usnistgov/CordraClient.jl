@@ -49,30 +49,31 @@ struct CordraConnection
     token::String # Authentication token
     verify::Bool # Require SSL verification?
 
-    function CordraConnection(host::AbstractString, username::AbstractString, password::Union{Nothing, AbstractString}=nothing; verify::Bool=true, full::Bool=false)
+    function CordraConnection(host::AbstractString, username::AbstractString, password::Union{Nothing,AbstractString}=nothing; verify::Bool=true, full::Bool=false)
         if isnothing(password)
             p = Base.getpass("Password")
             password = read(p, String)
             Base.shred!(p)
         end
-        auth_json = Dict{String, Any}(
+        auth_json = Dict{String,Any}(
             "grant_type" => "password",
             "username" => username,
             "password" => password
         )
-        r = _json(check_response(HTTP.request(
+        r = _json(CordraResponse(HTTP.request(
             "POST",
-            URI(parse(URI, "$host/auth/token"), query = Dict{String, Any}( "full" => full)),
+            URI(parse(URI, "$host/auth/token"), query=Dict{String,Any}("full" => full)),
             ["Content-type" => "application/json"],
             JSON.json(auth_json),
-            require_ssl_verification = verify,
-            status_exception = true
+            require_ssl_verification=verify,
+            status_exception=true
         )))
+        println(r)
         new(host, r["username"], r["access_token"], verify)
     end
 end
 
-function Base.open(f::Function, ::Type{CordraConnection}, host::AbstractString, username::AbstractString, password::Union{Nothing, AbstractString}=nothing; verify::Bool=true, full::Bool=false)
+function Base.open(f::Function, ::Type{CordraConnection}, host::AbstractString, username::AbstractString, password::Union{Nothing,AbstractString}=nothing; verify::Bool=true, full::Bool=false)
     cc = CordraConnection(host, username, password; verify=verify, full=full)
     try
         f(cc)
@@ -83,10 +84,8 @@ function Base.open(f::Function, ::Type{CordraConnection}, host::AbstractString, 
     end
 end
 
-# Helper to convert UInt8[] to JSON
-_json(r) = JSON.parse(String(copy(r)))
 
-function Base.open(::Type{CordraConnection}, host::AbstractString, username::AbstractString, password::Union{Nothing, AbstractString}=nothing; verify::Bool=true, full::Bool=false)
+function Base.open(::Type{CordraConnection}, host::AbstractString, username::AbstractString, password::Union{Nothing,AbstractString}=nothing; verify::Bool=true, full::Bool=false)
     return CordraConnection(host, username, password, verify=verify, full=full)
 end
 
@@ -97,18 +96,59 @@ end
 
 function Base.close(cc::CordraConnection)
     return HTTP.request(
-            "POST",
-            "$(cc.host)/auth/revoke",
-            ["Content-type" => "application/json"],
-            JSON.json(Dict{String, Any}( "token" => cc.token )),
-            require_ssl_verification = cc.verify,
-            status_exception = false
+        "POST",
+        "$(cc.host)/auth/revoke",
+        ["Content-type" => "application/json"],
+        JSON.json(Dict{String,Any}("token" => cc.token)),
+        require_ssl_verification=cc.verify,
+        status_exception=false
     )
 end
 
+# Helper to convert UInt8[] to JSON
+_json(r::CordraResponse) = JSON.parse(String(copy(r.body)))
+
 auth(cc::CordraConnection) = ["Authorization" => "Bearer $(cc.token)"]
 
+struct CordraHandle
+    handle::AbstractString
+    function CordraHandle(handle::AbstractString)
+        re = r"[a-zA-Z]*\/[\w\/]+"
+        @assert occursin(re, handle) "Invalid handle format"
+        new(handle)
+    end
+end
 
+
+struct CordraResponse
+    body::Vector{UInt8}
+    status::Int16
+    function CordraResponse(response::HTTP.Messages.Response)
+        # Checks for errors and only returns the response.body if there are none
+        if response.status > 400
+            (!isempty(response.body)) && println("CordraClient Error Message: " * _json(response.body)["message"])
+            error(string(copy(response.status)) * " " * HTTP.Messages.statustext(response.status))
+        end
+        new(response.body, response.status)
+    end
+end
+
+struct CordraObject
+    response::Union{Dict{String,Any},Vector{UInt8}}
+    handle::CordraHandle
+    function CordraObject(response::Union{Dict{String,Any},Vector{UInt8}}, handle::AbstractString)
+        handle = CordraHandle(handle)
+        new(response, handle)
+    end
+    function CordraObject(response::CordraResponse; full::bool)
+        body = _json(response.body)
+        if full
+            new(body, body["id"])
+        else
+            new(body["content"], body["id"])
+        end
+    end
+end
 
 """
     @JSON read_object(...)
@@ -117,17 +157,9 @@ Macro to return the object's JSON representation. Equivalent to `JSON.parse(Stri
 When including a single `jsonPointer`, the returned object from Cordra will be parsed by `JSON.parse` to a specific type.
 """
 macro JSON(v)
-    return esc( :( JSON.parse(String(copy($v))) ) )
+    return esc(:(JSON.parse(String(copy($v)))))
 end
 
-# Checks for errors and only returns the response.body if there are none
-function check_response(response)
-    if response.status > 400
-        (!isempty(response.body)) && println("CordraClient Error Message: "*_json(response.body)["message"])
-        error(string(copy(response.status)) *" "* HTTP.Messages.statustext(response.status))
-    end
-    response.body
-end
 
 """
     create_object(
@@ -165,74 +197,85 @@ function create_object(
     cc::CordraConnection,
     obj_json::AbstractDict,
     obj_type::AbstractString;
-    handle = nothing,
-    suffix = nothing,
-    dryRun::Bool = false,
-    full::Bool = false,
-    payloads = nothing,
-    acls = nothing
-)::Dict{String, Any}
+    handle=nothing,
+    suffix=nothing,
+    dryRun::Bool=false,
+    full::Bool=false,
+    payloads=nothing,
+    acls=nothing
+)::Union{Dict{String,Any},CordraObject}
     # Interpreting payload
     _mp(y) = HTTP.Multipart(y...)
     _mp(y::HTTP.Multipart) = y
     # Set up uri with params
-    params = Dict{String, Any}(
+    params = Dict{String,Any}(
         "type" => obj_type
     )
     (!isnothing(suffix)) && (params["suffix"] = suffix)
     (!isnothing(handle)) && (params["handle"] = handle)
     dryRun && (params["dryRun"] = true)
-    (full || (!isnothing(acls))) && (params["full"] = true)
-    uri = URI(parse(URI,"$(cc.host)/objects"), query=params)
+    params["full"] = true
+    uri = URI(parse(URI, "$(cc.host)/objects"), query=params)
     # Build the data with acl
-    data = Dict{String, Any}( "content" => JSON.json(obj_json))
+    data = Dict{String,Any}("content" => JSON.json(obj_json))
     (!isnothing(acls)) && (data["acl"] = JSON.json(acls))
     if !isnothing(payloads)
-        for (x,y) in payloads
+        for (x, y) in payloads
             data[x] = _mp(y)
         end
     end
     # Post the object
-    return _json(check_response(HTTP.post(uri, auth(cc), HTTP.Form(data); require_ssl_verification = cc.verify, status_exception = false)))
+    response = CordraResponse(HTTP.post(uri, auth(cc), HTTP.Form(data); require_ssl_verification=cc.verify, status_exception=false))
+    # if keys(response) == Set(["message"]) # unsuccessful create
+    #     return response
+    # end
+    if response.status != 200
+        return _json(response)
+    end
+    if full || !isnothing(acls) # full=true
+        return CordraObject(response; full=true)
+    else
+        return CordraObject(response; full=false)
+    end
 end
 
 function create_object(
     cc::CordraConnection,
     obj::DataFrameRow,
     obj_type::AbstractString;
-    handle = nothing,
-    suffix = nothing,
-    dryRun::Bool = false,
-    full::Bool = false,
-    payloads = nothing,
-    acls = nothing
-)::Dict{String, Any}
+    handle=nothing,
+    suffix=nothing,
+    dryRun::Bool=false,
+    full::Bool=false,
+    payloads=nothing,
+    acls=nothing
+)::Dict{String,Any}
     # Interpreting payload
     _mp(y) = HTTP.Multipart(y...)
     _mp(y::HTTP.Multipart) = y
     # Set up uri with params
-    params = Dict{String, Any}(
+    params = Dict{String,Any}(
         "type" => obj_type
     )
     (!isnothing(suffix)) && (params["suffix"] = suffix)
     (!isnothing(handle)) && (params["handle"] = handle)
     dryRun && (params["dryRun"] = true)
     (full || (!isnothing(acls))) && (params["full"] = true)
-    uri = URI(parse(URI,"$(cc.host)/objects"), query=params)
+    uri = URI(parse(URI, "$(cc.host)/objects"), query=params)
     # OrderedDict from DataFrameRow
     n = names(obj)
     obj_json = OrderedDict(zip(n, map(x -> getproperty(obj, x), n)))
 
     # Build the data with acl
-    data = Dict{String, Any}( "content" => JSON.json(obj_json))
+    data = Dict{String,Any}("content" => JSON.json(obj_json))
     (!isnothing(acls)) && (data["acl"] = JSON.json(acls))
     if !isnothing(payloads)
-        for (x,y) in payloads
+        for (x, y) in payloads
             data[x] = _mp(y)
         end
     end
     # Post the object
-    return _json(check_response(HTTP.post(uri, auth(cc), HTTP.Form(data); require_ssl_verification = cc.verify, status_exception = false)))
+    return _json(CordraResponse(HTTP.post(uri, auth(cc), HTTP.Form(data); require_ssl_verification=cc.verify, status_exception=false)))
 end
 
 """
@@ -248,10 +291,10 @@ Create a Cordra schema object.
 function create_schema(
     cc::CordraConnection,
     obj_type::AbstractString,
-    obj_json::Union{AbstractDict, AbstractString},
-)::Dict{String, Any}
-    uri = URI(parse(URI,"$(cc.host)/schemas/$(obj_type)"))
-    return _json(check_response(HTTP.put(uri, auth(cc), obj_json, require_ssl_verification = cc.verify, status_exception = false)))
+    obj_json::Union{AbstractDict,AbstractString},
+)::Dict{String,Any}
+    uri = URI(parse(URI, "$(cc.host)/schemas/$(obj_type)"))
+    return _json(CordraResponse(HTTP.put(uri, auth(cc), obj_json, require_ssl_verification=cc.verify, status_exception=false)))
 end
 
 """
@@ -278,11 +321,11 @@ function read_object(
     jsonFilter=nothing,
     full=false
 )::Vector{UInt8}
-    params = Dict{String, Any}("full" => full)
+    params = Dict{String,Any}("full" => full)
     (!isnothing(jsonPointer)) && (params["jsonPointer"] = jsonPointer)
     (!isnothing(jsonFilter)) && (params["jsonFilter"] = string(jsonFilter))
-    uri = URI(parse(URI,"$(cc.host)/objects/$handle"), query=params)
-    return check_response(HTTP.get(uri, auth(cc); require_ssl_verification = cc.verify, status_exception = false))
+    uri = URI(parse(URI, "$(cc.host)/objects/$handle"), query=params)
+    return CordraResponse(HTTP.get(uri, auth(cc); require_ssl_verification=cc.verify, status_exception=false))
 end
 
 
@@ -297,9 +340,9 @@ Retrieve a Cordra object payload names by identifier.
 function read_payload_info(
     cc::CordraConnection,
     handle::AbstractString
-    )
-    uri = URI(parse(URI,"$(cc.host)/objects/$handle"), query=Dict{String, Any}("full" => true))
-    r = _json(check_response(HTTP.get(uri, auth(cc); require_ssl_verification = cc.verify, status_exception = false)))
+)
+    uri = URI(parse(URI, "$(cc.host)/objects/$handle"), query=Dict{String,Any}("full" => true))
+    r = _json(CordraResponse(HTTP.get(uri, auth(cc); require_ssl_verification=cc.verify, status_exception=false)))
     return r["payloads"]
 end
 
@@ -317,8 +360,8 @@ function read_payload(
     handle::AbstractString,
     payload::AbstractString
 )::Vector{UInt8}
-    uri = URI(parse(URI,"$(cc.host)/objects/$handle"), query=Dict{String, Any}( "payload" => payload))
-    return check_response(HTTP.get(uri, auth(cc); require_ssl_verification = cc.verify, status_exception = false))
+    uri = URI(parse(URI, "$(cc.host)/objects/$handle"), query=Dict{String,Any}("payload" => payload))
+    return CordraResponse(HTTP.get(uri, auth(cc); require_ssl_verification=cc.verify, status_exception=false))
 end
 
 """
@@ -349,41 +392,41 @@ function update_object(
     full=false,
     payloads=nothing,
     acls=nothing
-)::Dict{String, Any}
+)::Dict{String,Any}
     # Interpreting payload
     _mp(y) = HTTP.Multipart(y...)
     _mp(y::HTTP.Multipart) = y
     # Configure params
-    params = Dict{String, Any}( "full" => full)
+    params = Dict{String,Any}("full" => full)
     (!isnothing(obj_type)) && (params["type"] = obj_type)
     dryRun && (params["dryRun"] = true)
     (!isnothing(jsonPointer)) && (params["jsonPointer"] = jsonPointer)
     (!isnothing(payloads)) && (params["full"] = true)
 
-    uri = URI(parse(URI,"$(cc.host)/objects/$handle"), query=params)
+    uri = URI(parse(URI, "$(cc.host)/objects/$handle"), query=params)
     if !isnothing(payloads) #multi-part request
         (!isnothing(jsonPointer)) && error("Cannot specify jsonPointer and payloads")
         # Construct the body
         if !isnothing(obj_json)
-            data = Dict{String, Any}( "content" => JSON.json(obj_json))
+            data = Dict{String,Any}("content" => JSON.json(obj_json))
         else
-            data = Dict{String, Any}( "content" => JSON.json(_json(read_object(cc, handle)))) # keep original object JSON if one is not provided
+            data = Dict{String,Any}("content" => JSON.json(_json(read_object(cc, handle)))) # keep original object JSON if one is not provided
         end
         (!isnothing(acls)) && (data["acl"] = JSON.json(acls))
-        for (x,y) in payloads
+        for (x, y) in payloads
             data[x] = _mp(y)
         end
         body = HTTP.Form(data)
-        r = _json(check_response(HTTP.put(uri, auth(cc), body; require_ssl_verification = cc.verify, status_exception = false)))
+        r = _json(CordraResponse(HTTP.put(uri, auth(cc), body; require_ssl_verification=cc.verify, status_exception=false)))
     elseif !isnothing(acls) #just update ACLs
-        uri = URI(parse(URI,"$(cc.host)/acls/$handle"), query=params)
-        r = _json(check_response(HTTP.put(uri, auth(cc), JSON.json(acls); require_ssl_verification = cc.verify, status_exception = false)))
+        uri = URI(parse(URI, "$(cc.host)/acls/$handle"), query=params)
+        r = _json(CordraResponse(HTTP.put(uri, auth(cc), JSON.json(acls); require_ssl_verification=cc.verify, status_exception=false)))
     else #just update object
         isnothing(obj_json) && error("obj_json is required")
         if !isnothing(jsonPointer)
-            r = Dict([string(strip(jsonPointer, ['/'])) => _json(check_response(HTTP.put(uri, auth(cc), JSON.json(obj_json); require_ssl_verification = cc.verify, status_exception = false)))])
+            r = Dict([string(strip(jsonPointer, ['/'])) => _json(CordraResponse(HTTP.put(uri, auth(cc), JSON.json(obj_json); require_ssl_verification=cc.verify, status_exception=false)))])
         else
-            r = _json(check_response(HTTP.put(uri, auth(cc), JSON.json(obj_json); require_ssl_verification = cc.verify, status_exception = false)))
+            r = _json(CordraResponse(HTTP.put(uri, auth(cc), JSON.json(obj_json); require_ssl_verification=cc.verify, status_exception=false)))
         end
     end
     return r
@@ -404,13 +447,13 @@ function delete_object(
     handle::AbstractString;
     jsonPointer=nothing
 )
-    params = Dict{String, Any}()
+    params = Dict{String,Any}()
     if !isnothing(jsonPointer)
-        read_object(cc, handle, jsonPointer = jsonPointer) # Throws error if jsonPointer not found
+        read_object(cc, handle, jsonPointer=jsonPointer) # Throws error if jsonPointer not found
         params["jsonPointer"] = jsonPointer
     end
-    uri = URI(parse(URI,"$(cc.host)/objects/$handle"), query=params)
-    r = _json(check_response(HTTP.delete(uri, auth(cc); require_ssl_verification = cc.verify, status_exception = false)))
+    uri = URI(parse(URI, "$(cc.host)/objects/$handle"), query=params)
+    r = _json(CordraResponse(HTTP.delete(uri, auth(cc); require_ssl_verification=cc.verify, status_exception=false)))
     t = isempty(r)
     if t
         return t
@@ -438,10 +481,10 @@ function delete_payload(
     payload::AbstractString
 )
     read_payload(cc, handle, payload) # Throws error if payload not found
-    params = Dict{String, Any}()
+    params = Dict{String,Any}()
     params["payload"] = payload
-    uri = URI(parse(URI,"$(cc.host)/objects/$handle"), query=params)
-    r = _json(check_response(HTTP.delete(uri, auth(cc); require_ssl_verification = cc.verify, status_exception = false)))
+    uri = URI(parse(URI, "$(cc.host)/objects/$handle"), query=params)
+    r = _json(CordraResponse(HTTP.delete(uri, auth(cc); require_ssl_verification=cc.verify, status_exception=false)))
     t = isempty(r)
     if t
         return t
@@ -474,7 +517,7 @@ function find_object(
     pageNum::Int=0,
     pageSize::Int=10
 )
-    params = Dict{String, Any}(
+    params = Dict{String,Any}(
         "query" => query,
         "ids" => ids,
         "full" => full,
@@ -482,8 +525,8 @@ function find_object(
         "pageSize" => pageSize
     )
     (!isnothing(jsonFilter)) && (params["filter"] = string(jsonFilter))
-    uri = URI(parse(URI,"$(cc.host)/objects/"), query=params)
-    return _json(check_response(HTTP.get(uri, auth(cc); require_ssl_verification = cc.verify, status_exception = false))) #not working well
+    uri = URI(parse(URI, "$(cc.host)/objects/"), query=params)
+    return _json(CordraResponse(HTTP.get(uri, auth(cc); require_ssl_verification=cc.verify, status_exception=false))) #not working well
 end
 
 """
@@ -495,11 +538,11 @@ function read_token(
     cc::CordraConnection;
     full::Bool=false
 )
-    params = Dict{String, Any}("full" => full)
-    auth_json = Dict{String, Any}("token" => cc.token)
-    uri = URI(parse(URI,"$(cc.host)/auth/introspect"), query = params)
-    return _json(check_response(HTTP.request("POST", uri,
-        ["Content-type" => "application/json"], JSON.json(auth_json), require_ssl_verification = cc.verify, status_exception = false)))
+    params = Dict{String,Any}("full" => full)
+    auth_json = Dict{String,Any}("token" => cc.token)
+    uri = URI(parse(URI, "$(cc.host)/auth/introspect"), query=params)
+    return _json(CordraResponse(HTTP.request("POST", uri,
+        ["Content-type" => "application/json"], JSON.json(auth_json), require_ssl_verification=cc.verify, status_exception=false)))
 end
 
 end
