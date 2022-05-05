@@ -139,19 +139,19 @@ struct CordraObject
         handle = CordraHandle(handle)
         new(response, handle)
     end
-    function CordraObject(response::CordraResponse; full::bool)
+    function CordraObject(response::CordraResponse; full::Bool)
         body = _json(response.body)
         if full
-            new(body, body["id"])
+            CordraObject(body, body["id"])
         else
-            
-            new(body["content"], body["id"])
+            CordraObject(body["content"], body["id"])
         end
     end
 end
 
 # Helper to convert UInt8[] to JSON
 _json(r::CordraResponse) = JSON.parse(String(copy(r.body)))
+_json(r::Vector{UInt8}) = JSON.parse(String(copy(r)))
 
 """
     @JSON read_object(...)
