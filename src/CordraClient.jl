@@ -286,13 +286,8 @@ function create_object(
     end
     # Post the object
     response = CordraResponse(HTTP.post(uri, auth(cc), HTTP.Form(data); require_ssl_verification=cc.verify, status_exception=false))
-
-    if response.status != 200
-        return _json(response) # not successful = no CordraObject
-    end
-
+    (response.status != 200) && error(_json(response)) # not successful = no CordraObject
     return CordraObject(response, cc)
-
 end
 
 function create_object(
@@ -334,7 +329,7 @@ function create_object(
     end
     # Post the object
     response = CordraResponse(HTTP.post(uri, auth(cc), HTTP.Form(data); require_ssl_verification=cc.verify, status_exception=false))
-
+    (response.status != 200) && error(_json(response)) # not successful = no CordraObject
     return CordraObject(response, cc)
 end
 
