@@ -9,10 +9,12 @@ using DataFrames
 
 # The external interface to the CordraClient package
 export CordraConnection
+export content
 export create_object
 export create_schema
 export read_payload_info
 export read_payload
+export export_payload
 export update_object
 export update_acls
 export delete_object
@@ -24,7 +26,7 @@ export query_ids
 export nquery
 export update_schema
 export get_schema
-
+export build_acls
 
 
 """
@@ -94,6 +96,9 @@ struct CordraConnection
     end
 end
 
+Base.show(io::IO, cc::CordraConnection) = # 
+    print(io, "Cordra[$(cc.host)/$(cc.prefix) as $(cc.username)]")
+
 function Base.open(f::Function, ::Type{CordraConnection}, host::AbstractString, username::AbstractString, password::Union{Nothing,AbstractString}=nothing; verify::Bool=true, full::Bool=false)
     cc = CordraConnection(host, username, password; verify=verify, full=full)
     try
@@ -138,6 +143,8 @@ struct CordraHandle
     end
 end
 
+Base.show(io::IO, ch::CordraHandle) = #
+    print(io, "CordraHandle[$(ch.value)]")
 
 struct CordraResponse
     body::Vector{UInt8}
@@ -179,6 +186,9 @@ struct CordraObject
     end
 end
 
+Base.show(io::IO, co::CordraObject) = #
+    print(io, "CordraObject[$(co.handle.value)]")
+
 # Helper to convert UInt8[] to JSON
 _json(r::CordraResponse) = JSON.parse(String(copy(r.body)))
 _json(r::Vector{UInt8}) = JSON.parse(String(copy(r)))
@@ -192,6 +202,7 @@ function _prefix(cc::CordraConnection, handle::AbstractString)
     @assert prefix == cc.prefix || ( startswith(prefix,"\"") && prefix[2:end]==cc.prefix ) "Handle's prefix does not match connection's prefix"
 end
 
+content(co::CordraObject) = co.response["content"]
 
 """
     create_object(
@@ -450,6 +461,33 @@ read_payload(
     payload::AbstractString
 ) = read_payload(CordraHandle(handle, cc), payload)
 
+
+"""
+    export_payload(
+        handle::CordraHandle|CordraObject,
+        payload::AbstractString,
+        filename::AbstractString
+    )
+
+Write the payload into a binary file.  Return the filename.
+"""
+function export_payload(
+    handle::CordraHandle,
+    payload::AbstractString,
+    filename::AbstractString
+) 
+    open(filename, "wb") do f
+        write(f, read_payload(handle, payload))
+    end
+    return filename
+end
+export_payload(
+    co::CordraObject,
+    payload::AbstractString,
+    filename::AbstractString
+)  = export_payload(co.handle, payload, filename)
+
+
 """
     update_object(
         co::CordraObject;
@@ -507,28 +545,57 @@ function update_object(
 end
 
 """
-    update_acls(
-        handle::CordraHandle,
-        acls::Dict{String,T} where {T<:Union{Array{Any,1},Vector{<:AbstractString}}};
-        dryRun=false
-    )::CordraObject
+    build_acls(cc::CordraConnection;
+        readers::Vector{<:AbstractString} = String[],
+        writers::Vector{<:AbstractString} = String[],
+        payloadreaders::Vector{<:AbstractString} = String[]
+    )::Dict{String,String[]}
+
+Build an access control list from the user names specified in `readers`, `writers` and `payloadreaders`.
+"""
+function build_acls(cc::CordraConnection;
+    readers::Vector{<:AbstractString} = String[],
+    writers::Vector{<:AbstractString} = String[],
+    payloadreaders::Vector{<:AbstractString} = String[]
+)
+    get_user_ids(usernames) = mapreduce(append!, usernames, init=String[]) do username
+        ids = query_ids(cc,"type:User AND username=$username")
+        map(id->id.value, ids)
+    end
+    return Dict(
+        "readers" => get_user_ids(readers),
+        "writers" => get_user_ids(writers),
+        "payloadreaders" => get_user_ids(payloadreaders)
+    )
+end
+
+"""
     update_acls(
         co::CordraObject,
         acls::Dict{String,Vector{<:AbstractString}};
         dryRun=false
     )::CordraObject
-
-Update a Cordra object's acls. Return the updated `CordraObject`.
+    update_acls(
+        co::CordraObject;
+        readers::Vector{<:AbstractString} = String[],
+        writers::Vector{<:AbstractString} = String[],
+        payloadreaders::Vector{<:AbstractString} = String[],
+        dryRun=false
+    )::CordraObject
+    
+Replaces a Cordra object's acls. Return the updated `CordraObject`.
 """
 function update_acls(
-    handle::CordraHandle,
-    acls::Dict{String,T} where {T<:Union{Array{Any,1},Vector{<:AbstractString}}};
+    co::CordraObject,
+    acls::Dict{String, Vector{<:AbstractString}};
     dryRun=false
 )::CordraObject
     # Getting CordraConnection and handle
-    cc, hdl = handle.connection, handle.value
-    data = Dict{String,Any}("content" => JSON.json(co.response["content"]))
-    data["acl"] = JSON.json(acls)
+    cc, hdl = co.handle.connection, co.handle.value
+    data = Dict{String,Any}(
+        "content" => JSON.json(co.response["content"]),
+        "acl" => acls
+    )
     body = HTTP.Form(data)
     # Configure params
     params = Dict{String,Any}("full" => true)
@@ -538,16 +605,12 @@ function update_acls(
     return CordraObject(response, cc)
 end
 update_acls(
-    co::CordraObject,
-    acls::Dict{String,T} where {T<:Union{Array{Any,1},Vector{<:AbstractString}}};
-    vargs...
-)::CordraObject = update_acls(co.handle, acls; vargs...)
-update_acls(
-    cc::CordraConnection,
-    handle::AbstractString,
-    acls::Dict{String,T} where {T<:Union{Array{Any,1},Vector{<:AbstractString}}};
-    vargs...
-)::CordraObject = update_acls(CordraHandle(cc, handle), acls; vargs...)
+    co::CordraObject;
+    readers::Vector{<:AbstractString} = String[],
+    writers::Vector{<:AbstractString} = String[],
+    payloadreaders::Vector{<:AbstractString} = String[],
+    dryRun=false
+)::CordraObject = update_acls(co, build_acls(co.handle.connection, readers=readers, writers=writers, payloadreaders=payloadreaders), dryRun=dryRun)
 
 """
     delete_object(
