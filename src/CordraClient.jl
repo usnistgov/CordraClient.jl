@@ -292,43 +292,10 @@ function create_object(
     cc::CordraConnection,
     obj::DataFrameRow,
     obj_type::AbstractString;
-    handle=nothing,
-    suffix=nothing,
-    dryRun::Bool=false,
-    payloads=nothing,
-    acls=nothing
-)::CordraObject
-
-    (isnothing(handle)) || (_prefix(cc, handle))
-
-    # Interpreting payload
-    _mp(y) = HTTP.Multipart(y...)
-    _mp(y::HTTP.Multipart) = y
-    # Set up uri with params
-    params = Dict{String,Any}(
-        "type" => obj_type
-    )
-    (isnothing(suffix)) || (params["suffix"] = replace(suffix, r"\s" => "_"))
-    (isnothing(handle)) || (params["handle"] = replace(handle, r"\s" => "_" ))
-    dryRun && (params["dryRun"] = true)
-    params["full"] = true
-    uri = URI(parse(URI, "$(cc.host)/objects"), query=params)
-    # OrderedDict from DataFrameRow
-    n = names(obj)
-    obj_json = OrderedDict(zip(n, map(x -> getproperty(obj, x), n)))
-
-    # Build the data with acl
-    data = Dict{String,Any}("content" => JSON.json(obj_json))
-    (isnothing(acls)) || (data["acl"] = JSON.json(acls))
-    if !isnothing(payloads)
-        for (x, y) in payloads
-            data[x] = _mp(y)
-        end
-    end
-    # Post the object
-    response = CordraResponse(HTTP.post(uri, auth(cc), HTTP.Form(data); require_ssl_verification=cc.verify, status_exception=false))
-    (response.status != 200) && error(_json(response)) # not successful = no CordraObject
-    return CordraObject(response, cc)
+    vargs...
+)
+    obj_json = OrderedDict(zip(n, map(x -> getproperty(obj, x), names(obj))))
+    create_object(cc, obj_json, obj_type; vargs...)
 end
 
 """
@@ -420,6 +387,9 @@ get_object(
 
 """
     read_payload_info(
+        handle::CordraHandle
+    )::Vector{Dict{String,Any}}
+    read_payload_info(
         co::CordraObject
     )::Vector{Dict{String,Any}}
     read_payload_info(
@@ -444,7 +414,7 @@ read_payload_info(
 read_payload_info(
     cc::CordraConnection,
     handle::AbstractString
-)::Vector{Dict{String,Any}} = read_payload_info(CordraHandle(handle, cc))
+) = read_payload_info(CordraHandle(handle, cc))
 
 """
     read_payload(
@@ -470,16 +440,15 @@ end
 function read_payload(
     co::CordraObject,
     payload::AbstractString
-)::Vector{UInt8} 
+)
     @assert "payloads" in keys(co.response) "The specified CordraObject has no payloads"
     read_payload(co.handle, payload)
 end
-
 read_payload(
     cc::CordraConnection,
     handle::AbstractString,
     payload::AbstractString
-)::Vector{UInt8} = read_payload(CordraHandle(handle, cc), payload)
+) = read_payload(CordraHandle(handle, cc), payload)
 
 """
     update_object(
