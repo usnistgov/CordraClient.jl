@@ -271,8 +271,8 @@ function create_object(
     params = Dict{String,Any}(
         "type" => obj_type
     )
-    (isnothing(suffix)) || (params["suffix"] = suffix)
-    (isnothing(handle)) || (params["handle"] = handle)
+    (isnothing(suffix)) || (params["suffix"] = replace(suffix, r"\s" => "_"))
+    (isnothing(handle)) || (params["handle"] = replace(handle, r"\s" => "_" ))
     dryRun && (params["dryRun"] = true)
     params["full"] = true # do not change
     uri = URI(parse(URI, "$(cc.host)/objects"), query=params)
@@ -315,8 +315,8 @@ function create_object(
     params = Dict{String,Any}(
         "type" => obj_type
     )
-    (isnothing(suffix)) || (params["suffix"] = suffix)
-    (isnothing(handle)) || (params["handle"] = handle)
+    (isnothing(suffix)) || (params["suffix"] = replace(suffix, r"\s" => "_"))
+    (isnothing(handle)) || (params["handle"] = replace(handle, r"\s" => "_" ))
     dryRun && (params["dryRun"] = true)
     params["full"] = true
     uri = URI(parse(URI, "$(cc.host)/objects"), query=params)
