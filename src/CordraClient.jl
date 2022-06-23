@@ -126,8 +126,6 @@ function Base.close(cc::CordraConnection)
     )
 end
 
-
-
 auth(cc::CordraConnection) = ["Authorization" => "Bearer $(cc.token)"]
 
 struct CordraHandle
@@ -135,7 +133,7 @@ struct CordraHandle
     connection::CordraConnection
     function CordraHandle(value::AbstractString, cc::CordraConnection)
         prefix = split(value, '/')[1]
-        @assert prefix == cc.prefix "Prefix does not match connection's prefix"
+        @assert (prefix == cc.prefix) || (startswith(prefix, "\"") && ( prefix[2:end] == cc.prefix )) "Prefix does not match connection's prefix"
         new(value, cc)
     end
 end
@@ -191,7 +189,7 @@ _ch(co::CordraObject) = co.handle.connection, co.handle.value
 # Helper to check a handle's prefix against a CordraConnection's prefix
 function _prefix(cc::CordraConnection, handle::AbstractString)
     prefix = split(handle, '/')[1]
-    @assert prefix == cc.prefix "Handle's prefix does not match connection's prefix"
+    @assert prefix == cc.prefix || ( startswith(prefix,"\"") && prefix[2:end]==cc.prefix ) "Handle's prefix does not match connection's prefix"
 end
 
 
@@ -407,18 +405,18 @@ Retrieve a Cordra object by its unique identifier. Return a `CordraObject`.
 
 """
 function get_object(
-    cc::CordraConnection,
-    handle::AbstractString
-)::CordraObject
-
-    _prefix(cc, handle)
-
+    handle::CordraHandle
+) 
+    cc, hdl = handle.connection, handle.value
     params = Dict{String,Any}("full" => true)
-    uri = URI(parse(URI, "$(cc.host)/objects/$handle"), query=params)
+    uri = URI(parse(URI, "$(cc.host)/objects/$hdl"), query=params)
     response = CordraResponse(HTTP.get(uri, auth(cc); require_ssl_verification=cc.verify, status_exception=false))
-
     return CordraObject(response, cc)
 end
+get_object(
+    cc::CordraConnection,
+    handle::AbstractString
+) = get_object(CordraHandle(handle, cc))
 
 """
     read_payload_info(
@@ -432,65 +430,56 @@ end
 Retrieve a Cordra object payload info by identifier.
 """
 function read_payload_info(
-    co::CordraObject
+    handle::CordraHandle
 )::Vector{Dict{String,Any}}
     # Getting CordraConnection and handle
-    cc, handle = _ch(co)
-
-    @assert "payloads" in keys(co.response) "The specified CordraObject has no payloads"
-
-    uri = URI(parse(URI, "$(cc.host)/objects/$handle"), query=Dict{String,Any}("full" => true))
+    cc, hdl = handle.connection, handle.value
+    uri = URI(parse(URI, "$(cc.host)/objects/$hdl"), query=Dict{String,Any}("full" => true))
     r = _json(CordraResponse(HTTP.get(uri, auth(cc); require_ssl_verification=cc.verify, status_exception=false)))
-    return r["payloads"]
+    return get(r, "payloads", Vector{Dict{String,Any}}())
 end
-
-function read_payload_info(
+read_payload_info(
+    co::CordraObject
+) = read_payload_info(co.handle)
+read_payload_info(
     cc::CordraConnection,
     handle::AbstractString
-)::Vector{Dict{String,Any}}
-    _prefix(cc, handle)
-
-    uri = URI(parse(URI, "$(cc.host)/objects/$handle"), query=Dict{String,Any}("full" => true))
-    r = _json(CordraResponse(HTTP.get(uri, auth(cc); require_ssl_verification=cc.verify, status_exception=false)))
-    return r["payloads"]
-end
+)::Vector{Dict{String,Any}} = read_payload_info(CordraHandle(handle, cc))
 
 """
     read_payload(
         co::CordraObject,
         payload::AbstractString
-        )
+    )
     read_payload(
         cc::CordraConnection,
         handle::AbstractString,
         payload::AbstractString
-        )
+    )
 
 Retrieve a Cordra object payload by identifier and payload name.
 """
 function read_payload(
-    co::CordraObject,
+    handle::CordraHandle,
     payload::AbstractString
 )::Vector{UInt8}
-    # Getting CordraConnection and handle
-    cc, handle = _ch(co)
-    @assert "payloads" in keys(co.response) "The specified CordraObject has no payloads"
-
-    uri = URI(parse(URI, "$(cc.host)/objects/$handle"), query=Dict{String,Any}("payload" => payload))
+    cc, hdl = handle.connection, handle.value
+    uri = URI(parse(URI, "$(cc.host)/objects/$hdl"), query=Dict{String,Any}("payload" => payload))
     return CordraResponse(HTTP.get(uri, auth(cc); require_ssl_verification=cc.verify, status_exception=false)).body
 end
-
 function read_payload(
+    co::CordraObject,
+    payload::AbstractString
+)::Vector{UInt8} 
+    @assert "payloads" in keys(co.response) "The specified CordraObject has no payloads"
+    read_payload(co.handle, payload)
+end
+
+read_payload(
     cc::CordraConnection,
     handle::AbstractString,
     payload::AbstractString
-)::Vector{UInt8}
-
-    _prefix(cc, handle)
-
-    uri = URI(parse(URI, "$(cc.host)/objects/$handle"), query=Dict{String,Any}("payload" => payload))
-    return CordraResponse(HTTP.get(uri, auth(cc); require_ssl_verification=cc.verify, status_exception=false)).body
-end
+)::Vector{UInt8} = read_payload(CordraHandle(handle, cc), payload)
 
 """
     update_object(
@@ -502,16 +491,6 @@ end
         payloads=nothing,
         payloadToDelete=nothing
     )::CordraObject
-    update_object(
-        cc::CordraConnection,
-        handle::AbstractString;     # The object's ID
-        obj_json=nothing,
-        jsonPointer=nothing,
-        obj_type=nothing,
-        dryRun=false,
-        payloads=nothing,
-        payloadToDelete=nothing
-        )::CordraObject
 
 Update a Cordra object. Return the `CordraObject`.
 
@@ -558,49 +537,12 @@ function update_object(
     return CordraObject(response, cc)
 end
 
-function update_object(
-    cc::CordraConnection,
-    handle::AbstractString;
-    obj_json=nothing,
-    jsonPointer=nothing,
-    obj_type=nothing,
-    dryRun=false,
-    payloads=nothing,
-    payloadToDelete=nothing
-)::CordraObject
-
-    _prefix(cc, handle)
-    co = get_object(cc, handle)
-
-    # Interpreting payload
-    _mp(y) = HTTP.Multipart(y...)
-    _mp(y::HTTP.Multipart) = y
-    # Configure params
-    params = Dict{String,Any}("full" => true)
-    (isnothing(obj_type)) || (params["type"] = obj_type)
-    dryRun && (params["dryRun"] = true)
-    (isnothing(jsonPointer)) || (params["jsonPointer"] = jsonPointer)
-    isnothing(obj_json) && (data = Dict{String,Any}("content" => JSON.json(co.response["content"])))
-
-    (isnothing(payloadToDelete)) || (params["payloadToDelete"] = payloadToDelete)
-
-    uri = URI(parse(URI, "$(cc.host)/objects/$handle"), query=params)
-    if !isnothing(payloads) # multi-part request
-        (isnothing(jsonPointer)) || error("Cannot specify jsonPointer and payloads")
-        # Construct the body
-        for (x, y) in payloads
-            data[x] = _mp(y)
-        end
-        body = HTTP.Form(data)
-        response = CordraResponse(HTTP.put(uri, auth(cc), body; require_ssl_verification=cc.verify, status_exception=false))
-    else # just update object
-        isnothing(obj_json) && error("obj_json is required")
-        response = CordraResponse(HTTP.put(uri, auth(cc), JSON.json(obj_json); require_ssl_verification=cc.verify, status_exception=false))
-    end
-    return get_object(cc, handle)
-end
-
 """
+    update_acls(
+        handle::CordraHandle,
+        acls::Dict{String,T} where {T<:Union{Array{Any,1},Vector{<:AbstractString}}};
+        dryRun=false
+    )::CordraObject
     update_acls(
         co::CordraObject,
         acls::Dict{String,Vector{<:AbstractString}};
@@ -610,44 +552,33 @@ end
 Update a Cordra object's acls. Return the updated `CordraObject`.
 """
 function update_acls(
-    co::CordraObject,
+    handle::CordraHandle,
     acls::Dict{String,T} where {T<:Union{Array{Any,1},Vector{<:AbstractString}}};
     dryRun=false
 )::CordraObject
     # Getting CordraConnection and handle
-    cc, handle = _ch(co)
-
+    cc, hdl = handle.connection, handle.value
     data = Dict{String,Any}("content" => JSON.json(co.response["content"]))
     data["acl"] = JSON.json(acls)
     body = HTTP.Form(data)
     # Configure params
     params = Dict{String,Any}("full" => true)
     dryRun && (params["dryRun"] = true)
-    uri = URI(parse(URI, "$(cc.host)/objects/$handle"), query=params)
+    uri = URI(parse(URI, "$(cc.host)/objects/$hdl"), query=params)
     response = CordraResponse(HTTP.put(uri, auth(cc), body; require_ssl_verification=cc.verify, status_exception=false))
     return CordraObject(response, cc)
 end
-
-function update_acls(
+update_acls(
+    co::CordraObject,
+    acls::Dict{String,T} where {T<:Union{Array{Any,1},Vector{<:AbstractString}}};
+    vargs...
+)::CordraObject = update_acls(co.handle, acls; vargs...)
+update_acls(
     cc::CordraConnection,
     handle::AbstractString,
     acls::Dict{String,T} where {T<:Union{Array{Any,1},Vector{<:AbstractString}}};
-    dryRun=false
-)::CordraObject
-
-    _prefix(cc, handle)
-    co = get_object(cc, handle)
-
-    data = Dict{String,Any}("content" => JSON.json(co.response["content"]))
-    data["acl"] = JSON.json(acls)
-    body = HTTP.Form(data)
-    # Configure params
-    params = Dict{String,Any}("full" => true)
-    dryRun && (params["dryRun"] = true)
-    uri = URI(parse(URI, "$(cc.host)/objects/$handle"), query=params)
-    response = CordraResponse(HTTP.put(uri, auth(cc), body; require_ssl_verification=cc.verify, status_exception=false))
-    return CordraObject(response, cc)
-end
+    vargs...
+)::CordraObject = update_acls(CordraHandle(cc, handle), acls; vargs...)
 
 """
     delete_object(
@@ -659,10 +590,26 @@ end
         co::CordraObject;
         jsonPointer::Union{Nothing,AbstractString}=nothing
         )::Bool
+    delete_object(
+        handle::CordraHandle
+    )
 If `jsonPointer` is specified, instead of deleting the object, only the content at the specified JSON pointer will be deleted (including the pointer itself).
 
 Delete a Cordra Object. Return `true` if successful.
 """
+function delete_object(handle::CordraHandle; params=Dict{String,Any}())
+    cc = handle.connection
+    uri = URI(parse(URI, "$(cc.host)/objects/$(handle.value)"), query=params)
+    r = _json(CordraResponse(HTTP.delete(uri, auth(cc); require_ssl_verification=cc.verify, status_exception=false)))
+    if !isempty(r)
+        if isnothing(jsonPointer)
+            error("There was an error deleting $handle")
+        else
+            error("There was an error deleting $jsonPointer from $handle")
+        end
+    end
+    return true
+end
 function delete_object(
     co::CordraObject;
     jsonPointer::Union{Nothing,AbstractString}=nothing
@@ -672,49 +619,26 @@ function delete_object(
         @assert strip(jsonPointer, '/') in keys(co.response["content"]) "Invalid jsonPointer"
         params["jsonPointer"] = jsonPointer
     end
-    # Getting CordraConnection and handle
-    cc, handle = _ch(co)
-    uri = URI(parse(URI, "$(cc.host)/objects/$handle"), query=params)
-    r = _json(CordraResponse(HTTP.delete(uri, auth(cc); require_ssl_verification=cc.verify, status_exception=false)))
-    t = isempty(r)
-    if t
-        return t
-    else
-        if isnothing(jsonPointer)
-            error("There was an error deleting $handle")
-        else
-            error("There was an error deleting $jsonPointer from $handle")
-        end
-    end
+    delete_object(co.handle, params=params)
 end
-
 function delete_object(
     cc::CordraConnection,
     handle::AbstractString;
     jsonPointer::Union{Nothing,AbstractString}=nothing
-)::Bool
-    _prefix(cc, handle)
-    co = get_object(cc, handle)
+)::Bool 
     params = Dict{String,Any}()
     if !isnothing(jsonPointer)
         @assert strip(jsonPointer, '/') in keys(co.response["content"]) "Invalid jsonPointer"
         params["jsonPointer"] = jsonPointer
     end
-    uri = URI(parse(URI, "$(cc.host)/objects/$handle"), query=params)
-    r = _json(CordraResponse(HTTP.delete(uri, auth(cc); require_ssl_verification=cc.verify, status_exception=false)))
-    t = isempty(r)
-    if t
-        return t
-    else
-        if isnothing(jsonPointer)
-            error("There was an error deleting $handle")
-        else
-            error("There was an error deleting $jsonPointer from $handle")
-        end
-    end
+    delete_object(CordraHandle(handle, cc), params=params)
 end
 
 """
+    function delete_payload(
+        handle::CordraHandle,
+        payload::AbstractString
+    )::Bool
     delete_payload(
         co::CordraObject,
         payload::AbstractString              # The name of the payload to delete
@@ -723,51 +647,31 @@ end
         cc::CordraConnection,
         handle::AbstractString,              # The object's ID
         payload::AbstractString              # The name of the payload to delete
-        )::Bool
+    )::Bool
 
 Delete a payload from a Cordra object. Return `true` if successful.
-
 """
 function delete_payload(
-    co::CordraObject,
+    handle::CordraHandle,
     payload::AbstractString
-)::Bool
-    # Getting CordraConnection and handle
-    cc, handle = _ch(co)
-
-    @assert "payloads" in keys(co.response) "The specified CordraObject has no payloads"
-    read_payload(co, payload) # Throws error if payload not found
-
+)::Bool 
+    cc = handle.connection
     params = Dict{String,Any}()
     params["payload"] = payload
-    uri = URI(parse(URI, "$(cc.host)/objects/$handle"), query=params)
+    uri = URI(parse(URI, "$(cc.host)/objects/$(handle.value)"), query=params)
     r = _json(CordraResponse(HTTP.delete(uri, auth(cc); require_ssl_verification=cc.verify, status_exception=false)))
-    t = isempty(r)
-    if t
-        return t
-    else
-        error("There was an error deleting payload $payload from $handle")
-    end
+    isempty(r) || error("There was an error deleting payload $payload from $handle")
+    return true
 end
-
-function delete_payload(
+delete_payload(
+    co::CordraObject,
+    payload::AbstractString
+)::Bool = delete_payload(co.handle, payload)
+delete_payload(
     cc::CordraConnection,
     handle::AbstractString,
     payload::AbstractString
-)::Bool
-    _prefix(cc, handle)
-
-    params = Dict{String,Any}()
-    params["payload"] = payload
-    uri = URI(parse(URI, "$(cc.host)/objects/$handle"), query=params)
-    r = _json(CordraResponse(HTTP.delete(uri, auth(cc); require_ssl_verification=cc.verify, status_exception=false)))
-    t = isempty(r)
-    if t
-        return t
-    else
-        error("There was an error deleting payload $payload from $handle")
-    end
-end
+)::Bool = delete_payload(CordraHandle(handle, cc), payload)
 
 """
     query(
