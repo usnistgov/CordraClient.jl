@@ -782,6 +782,15 @@ Find a Cordra object by query. Return a vector of CordraObject
 
 `pageSize` defines the number of results per page. If negative: no limit.
 
+The syntax for queries is described [here](https://www.cordra.org/documentation/api/search.html) and, 
+in more detail, [here](https://lucene.apache.org/core/2_9_4/queryparsersyntax.html).
+
+Examples:
+
+    query(cc, "/Name:Zippy") # Find an object containing a JSON leaf named "Name" with value "Zippy"
+    query(cc, "/Name:Zip*") # Wild card matches "Zippy", "Zipper", "Zipzan" etc.
+    query(cc, "/x1:[0.0 TO 0.2]") # Find an object with a numeric value named "x1" between 0.0 and 0.2
+    query(cc, "(/Name:Zip* OR /Name:Reg*) AND /x1:[0.0 TO 0.8]") # Boolean operators and grouping with (...)
 """
 function query( # search using /search POST? look at docs separate search fct
     cc::CordraConnection,
@@ -817,6 +826,7 @@ Find a Cordra object ID by query. Return a vector of CordraHandle
 
 `pageSize` defines the number of results per page. If negative: no limit.
 
+See: query(...) for search string documentation
 """
 function query_ids(
     cc::CordraConnection,
@@ -844,6 +854,7 @@ end
 
 Return the number of results when executing the query.
 
+See: query(...) for search string documentation
 """
 function nquery(
     cc::CordraConnection,
@@ -859,6 +870,7 @@ end
 
 """
     read_token( cc::CordraConnection)
+
 Get the properties ("userId", "active", "username" etc) associated with the current authentication token in `cc`.
 """
 function read_token(
