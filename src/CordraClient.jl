@@ -121,7 +121,7 @@ function Base.open(f::Function, ::Type{CordraConnection}, file="config.json"; ve
 end
 
 function Base.close(cc::CordraConnection)
-    return HTTP.request(
+    response = HTTP.request(
         "POST",
         "$(cc.host)/auth/revoke",
         ["Content-type" => "application/json"],
@@ -129,6 +129,8 @@ function Base.close(cc::CordraConnection)
         require_ssl_verification=cc.verify,
         status_exception=false
     )
+    (response.status != 200) && error(_json(response)) # not successful = no CordraObject
+    return true
 end
 
 auth(cc::CordraConnection) = ["Authorization" => "Bearer $(cc.token)"]
@@ -213,6 +215,7 @@ Example:
 ```julia-repl
 julia> cp1=CordraPayload("Desktop\\trialC.svg", "image/svg+xml")
 julia> cp2=CordraPayload("Desktop\\GSR2020.tsv", "text/tab-separated-values")
+julia> create_object(cc, json, "Stuff", payloads = [cp1, cp2])
 ```
 """
 struct CordraPayload
