@@ -13,7 +13,7 @@ using DataStructures
         "Number" => 2.093482,
         "Integer" => 55
     )
-  
+
     my_acls = Dict(
         "writers" => ["public"],
         "readers" => ["public"]
@@ -26,156 +26,164 @@ using DataStructures
     )
 
     test_name = "test/testing"
-    multiple_ids = map(x -> "test/multiple"*x, string.(1:9))
+    multiple_ids = map(x -> "test/multiple" * x, string.(1:9))
     path = joinpath(@__DIR__)
 
-    open(CordraConnection, joinpath(path, "config.json"), verify = false) do cc
-        if find_object(cc, "id:\"$test_name\"")["size"]==1
+    open(CordraConnection, joinpath(path, "config.json"), verify=false) do cc
+        if nquery(cc, "id:\"$test_name\"") == 1
             delete_object(cc, test_name)
-            @assert find_object(cc, "id:\"$test_name\"")["size"]==0
+            @assert nquery(cc, "id:\"$test_name\"") == 0
         end
-        if find_object(cc, "/debug")["size"]==0
+        if nquery(cc, "/debug") == 0
             create_schema(cc, "debug", Dict{String,Any}())
             # update_object(cc, "/schemas/debug", obj_json = Dict{String,Any}())
         end
-        @test create_object(cc, test_object, type, dryRun = true, handle = test_name)["Integer"] == 55
-        @test create_object(cc, test_object, type, full = true, dryRun = true, handle = test_name)["content"] == test_object
-        @test create_object(cc, test_object, type, acls = my_acls, dryRun = true, handle = test_name)["content"] == test_object
-        @test find_object(cc, "id:\"$test_name\"")["size"]==0
-        @test create_object(cc, test_object, type, dryRun = true, handle = test_name, payloads = ["TextFile" => [ "sample_file.txt", open(joinpath(path, "resources", "sample.txt"))]])["Integer"] == 55
-        @test find_object(cc, "id:\"$test_name\"")["size"]==0
-        @test create_object(cc, test_object, type, acls = my_acls, handle = test_name, payloads = ["TextFile" => [ "sample_file.txt", open(joinpath(path, "resources", "sample.txt"))]])["id"] == "test/testing"
-        @test find_object(cc, "id:\"$test_name\"")["size"]==1
-        @test update_object(cc, test_name, obj_json = Dict(["testing" => "update"]), dryRun = true) == Dict(["testing" => "update"])
-        @test JSON.parse(String(copy(read_object(cc, test_name)))) == test_object
-        @test String(read_object(cc, test_name, jsonPointer ="/Number")) == "2.093482"
-        @test read_payload_info(cc, test_name)[1]["size"] in (65,  66) # *NIX vs Windows
+        @test create_object(cc, test_object, type, dryRun=true, handle=test_name).response["content"]["Integer"] == 55
+        @test create_object(cc, test_object, type, dryRun=true, handle=test_name).response["content"] == test_object
+        @test create_object(cc, test_object, type, acls=my_acls, dryRun=true, handle=test_name).response["content"] == test_object
+        @test nquery(cc, "id:\"$test_name\"") == 0
+        @test create_object(cc, test_object, type, dryRun=true, handle=test_name, payloads=["TextFile" => ["sample_file.txt", open(joinpath(path, "resources", "sample.txt"))]]).response["content"]["Integer"] == 55
+        @test nquery(cc, "id:\"$test_name\"") == 0
+        ob1 = create_object(cc, test_object, type, acls=my_acls, handle=test_name, payloads=["TextFile" => ["sample_file.txt", open(joinpath(path, "resources", "sample.txt"))]])
+        print(ob1, ob1.response["payloads"])
+        @test ob1.handle.value == "test/testing"
+        @test nquery(cc, "id:\"$test_name\"") == 1
+        @test update_object(ob1; obj_json=Dict(["testing" => "update"]), dryRun=true).response["content"] == Dict(["testing" => "update"])
+        # @test JSON.parse(String(copy(read_object(cc, test_name)))) == test_object
+        # @test String(read_object(cc, test_name, jsonPointer="/Number")) == "2.093482"
+        @test read_payload_info(cc, test_name)[1]["size"] in (65, 66) # *NIX vs Windows
         @test String(read_payload(cc, test_name, "TextFile")) in ("This is a sample file to be uploaded as a payload.\r\nJust a sample.", "This is a sample file to be uploaded as a payload.\nJust a sample.") # *NIX vs Windows
-        @test update_object(cc, test_name, acls=my_acls, payloads = ["TestingNewFile" => ["alien.png", open(joinpath(path, "resources", "alien.png"))]])["content"]["Integer"] == 55
+        @test update_object(ob1; payloads=["TestingNewFile" => ["alien.png", open(joinpath(path, "resources", "alien.png"))]]).response["content"]["Integer"] == 55
         @test length(read_payload(cc, test_name, "TestingNewFile")) == 15647
-        @test update_object(cc, test_name, jsonPointer = "/Integer", obj_json = 326)["Integer"] == 326
-        @test String(read_object(cc, test_name, jsonPointer ="/Integer")) == "326"
-        res = read_object(cc, test_name, jsonPointer ="/Integer")
-        @test (@JSON res) == 326
-        res2 = read_object(cc, test_name)
-        @test (@JSON res2) == Dict("String" => "This is a String", "Number" => 2.093482,"Integer" => 326)
-        update_object(cc, test_name, payloads = [ "Array" => HTTP.Multipart("Array", IOBuffer(reinterpret(UInt8, collect(1.0:1.0:100.0))), "application/octet-stream")])
+        @test update_object(ob1, jsonPointer="/Integer", obj_json=326).response["content"]["Integer"] == 326
+        ob1 = update_acls(ob1, Dict(["writers" => [], "readers" => []]))
+        @test ob1.response["acl"] == Dict(["writers" => [], "readers" => []])
+        @test update_acls(ob1, my_acls; dryRun=true).response["acl"] == my_acls
+        ob1 = update_acls(ob1, my_acls)
+        @test_throws MethodError update_acls(ob1, Dict(["writers" => "admin", "readers" => ["public"]]))
+        # @test String(read_object(cc, test_name, jsonPointer="/Integer")) == "326"
+        # res = read_object(cc, test_name, jsonPointer="/Integer")
+        # @test (@JSON res) == 326
+        # res2 = read_object(cc, test_name)
+        # @test (@JSON res2) == Dict("String" => "This is a String", "Number" => 2.093482, "Integer" => 326)
+        update_object(ob1, payloads=["Array" => HTTP.Multipart("Array", IOBuffer(reinterpret(UInt8, collect(1.0:1.0:100.0))), "application/octet-stream")])
         @test length(read_payload_info(cc, test_name)) == 3
         @test delete_payload(cc, test_name, "TestingNewFile")
         @test length(read_payload_info(cc, test_name)) == 2
-        @test String(read_object(cc, test_name, jsonPointer ="/Number")) == "2.093482"
+        # @test String(read_object(cc, test_name, jsonPointer="/Number")) == "2.093482"
         @testset "OrderedDict" begin
-            if find_object(cc, "id:\"test/ordered\"")["size"]==1
+            if nquery(cc, "id:\"test/ordered\"") == 1
                 delete_object(cc, "test/ordered")
-                @assert find_object(cc, "id:\"test/ordered\"")["size"]==0
+                @assert nquery(cc, "id:\"test/ordered\"") == 0
             end
-            @test create_object(cc, test_ord_dict, type, dryRun = true, suffix = "ordered")["Fourth"] == 29999910
-            @test create_object(cc, test_ord_dict, type, full = true, dryRun = true, suffix = "ordered")["content"] == test_ord_dict
-            @test create_object(cc, test_ord_dict, type, acls = my_acls, dryRun = true, suffix = "ordered")["content"] == test_ord_dict
-            @test find_object(cc, "id:\"test/ordered\"")["size"]==0
-            @test create_object(cc, test_ord_dict, type, dryRun = true, suffix = "ordered", payloads = ["TextFile" => [ "sample_file.txt", open(joinpath(path, "resources", "sample.txt"))]])["Third"] == 2.857710001
-            @test find_object(cc, "id:\"test/ordered\"")["size"]==0
-            @test create_object(cc, test_ord_dict, type, acls = my_acls, suffix = "ordered", payloads = ["TextFile" => [ "sample_file.txt", open(joinpath(path, "resources", "sample.txt"))]])["id"] == "test/ordered"
-            @test find_object(cc, "id:\"test/ordered\"")["size"]==1
+            @test create_object(cc, test_ord_dict, type, dryRun=true, suffix="ordered").response["content"]["Fourth"] == 29999910
+            @test create_object(cc, test_ord_dict, type, dryRun=true, suffix="ordered").response["content"] == test_ord_dict
+            @test create_object(cc, test_ord_dict, type, acls=my_acls, dryRun=true, suffix="ordered").response["content"] == test_ord_dict
+            @test nquery(cc, "id:\"test/ordered\"") == 0
+            @test create_object(cc, test_ord_dict, type, dryRun=true, suffix="ordered", payloads=["TextFile" => ["sample_file.txt", open(joinpath(path, "resources", "sample.txt"))]]).response["content"]["Third"] == 2.857710001
+            @test nquery(cc, "id:\"test/ordered\"") == 0
+            @test create_object(cc, test_ord_dict, type, acls=my_acls, suffix="ordered", payloads=["TextFile" => ["sample_file.txt", open(joinpath(path, "resources", "sample.txt"))]]).handle.value == "test/ordered"
+            @test nquery(cc, "id:\"test/ordered\"") == 1
             delete_object(cc, "test/ordered")
-            @assert find_object(cc, "id:\"test/ordered\"")["size"]==0
+            @assert nquery(cc, "id:\"test/ordered\"") == 0
         end
 
         # TODO create test for DataFrameRow
         # Create test users
         for id in ["test/testuser", "test/testuser2"]
-            if find_object(cc, "id:$id")["size"]==1
+            if nquery(cc, "id:$id") == 1
                 delete_object(cc, id)
-                @assert find_object(cc, id)==0
+                @assert nquery(cc, "id:\"$id\"") == 0
             end
         end
-        create_object(cc, Dict(["username" => "testuser", "password" => "thisisatestpassword"]), "User", suffix = "testuser")
-        test_cc = CordraConnection(cc.host, "testuser", "thisisatestpassword", verify = cc.verify)
+        create_object(cc, Dict(["username" => "testuser", "password" => "thisisatestpassword"]), "User", suffix="testuser")
+        test_cc = CordraConnection(cc.host, "testuser", "thisisatestpassword", verify=cc.verify)
         try
-            create_object(test_cc, Dict(["username" => "testuser2", "password" => "thisisatestpassword"]), "User", suffix = "testuser2")
+            create_object(test_cc, Dict(["username" => "testuser2", "password" => "thisisatestpassword"]), "User", suffix="testuser2")
         catch e
-            @test e.msg == "403 Forbidden"
+            @test occursin("403 Forbidden", e.msg)
         end
-        create_object(cc, Dict(["username" => "testuser2", "password" => "thisisatestpassword"]), "User", suffix = "testuser2")
-        test_cc_2 = CordraConnection(cc.host, "testuser2", "thisisatestpassword", verify = cc.verify)
-        @test JSON.parse(String(copy(read_object(cc, test_name, full = true))))["acl"] == my_acls
-        update_object(cc, test_name, acls = ["readers" => [], "writers" => []])
+        create_object(cc, Dict(["username" => "testuser2", "password" => "thisisatestpassword"]), "User", suffix="testuser2")
+        test_cc_2 = CordraConnection(cc.host, "testuser2", "thisisatestpassword", verify=cc.verify)
+        # @test JSON.parse(String(copy(read_object(cc, test_name))))["acl"] == my_acls
+        update_acls(cc, test_name, Dict(["readers" => [], "writers" => []]))
         try
-            read_object(test_cc, test_name)
+            get_object(test_cc, test_name)
         catch e
-            @test e.msg == "403 Forbidden"
-        end
-        try
-            read_object(test_cc_2, test_name)
-        catch e
-            @test e.msg == "403 Forbidden"
-        end
-        @test String(copy(read_object(cc, test_name, jsonPointer = "/Number"))) == "2.093482"
-        update_object(cc, test_name, acls = ["readers" => ["test/testuser"], "writers" => []])
-        @test String(copy(read_object(test_cc, test_name, jsonPointer = "/Number"))) == "2.093482"
-        try
-            read_object(test_cc_2, test_name)
-        catch e
-            @test e.msg == "403 Forbidden"
+            @test occursin("403 Forbidden", e.msg)
         end
         try
-            update_object(test_cc, test_name, acls = ["readers" => ["test/testuser"], "writers" => ["test/testuser"]])
+            get_object(test_cc_2, test_name)
         catch e
-            @test e.msg == "403 Forbidden"
+            @test occursin("403 Forbidden", e.msg)
         end
-        update_object(cc, test_name, acls = ["readers" => ["test/testuser"], "writers" => ["test/testuser2"]])
-        @test String(copy(read_object(test_cc_2, test_name, jsonPointer = "/Number"))) == "2.093482"
-        update_object(test_cc_2, test_name, acls = ["readers" => [], "writers" => []])
+        # @test String(copy(read_object(cc, test_name, jsonPointer="/Number"))) == "2.093482"
+        update_acls(ob1, Dict(["readers" => ["test/testuser"], "writers" => []]))
+        # @test String(copy(read_object(test_cc, test_name, jsonPointer="/Number"))) == "2.093482"
         try
-            read_object(test_cc, test_name)
+            get_object(test_cc_2, test_name)
         catch e
-            @test e.msg == "403 Forbidden"
+            @test occursin("403 Forbidden", e.msg)
         end
         try
-            read_object(test_cc_2, test_name)
+            update_acls(test_cc, test_name, Dict(["readers" => ["test/testuser"], "writers" => ["test/testuser"]]))
         catch e
-            @test e.msg == "403 Forbidden"
+            @test occursin("403 Forbidden", e.msg)
+        end
+        update_acls(cc, test_name, Dict(["readers" => ["test/testuser"], "writers" => ["test/testuser2"]]))
+        # @test String(copy(read_object(test_cc_2, test_name, jsonPointer="/Number"))) == "2.093482"
+        update_acls(test_cc_2, test_name, Dict(["readers" => [], "writers" => []]))
+        try
+            get_object(test_cc, test_name)
+        catch e
+            @test occursin("403 Forbidden", e.msg)
+        end
+        try
+            get_object(test_cc_2, test_name)
+        catch e
+            @test occursin("403 Forbidden", e.msg)
         end
         for id in ["test/testuser", "test/testuser2"]
             delete_object(cc, id)
         end
         for id in ["test/testuser", "test/testuser2"]
-            @test find_object(cc, "id:$id")["size"]==0
+            @test nquery(cc, "id:$id") == 0
         end
         for id in multiple_ids
-            create_object(cc, test_object, type, acls = my_acls, handle = id)
+            create_object(cc, test_object, type, acls=my_acls, handle=id)
         end
-        @test find_object(cc, "/Number:2.093482")["size"] == 10
-        @test length(find_object(cc, "/Number:2.093482", ids = true)["results"]) == 10
-        @test Set(find_object(cc, "/Integer:55", ids = true)["results"]) == Set(multiple_ids)
+        @test nquery(cc, "/Number:2.093482") == 10
+        @test length(query_ids(cc, "/Number:2.093482")) == 10
+        @test Set([x.value for x in query_ids(cc, "/Integer:55")]) == union(Set(multiple_ids), [test_name])
         for id in multiple_ids
             delete_object(cc, id)
         end
-        @test find_object(cc, "/Number:2.093482")["size"] == 1
-        @test_throws HTTP.ExceptionRequest.StatusError CordraConnection(cc.host, cc.username, "thisisclearlynotyourpassword", verify = false)
+        @test nquery(cc, "/Number:2.093482") == 1
+        @test_throws HTTP.ExceptionRequest.StatusError CordraConnection(cc.host, cc.username, "thisisclearlynotyourpassword", verify=false)
         try
-            read_object(cc, "notarealid")
+            get_object(cc, "test/notarealid")
         catch e
-            @test e.msg == "404 Not Found"        
+            @test occursin("404 Not Found", e.msg)
         end
-        @test JSON.parse(String(copy(read_object(cc, test_name, jsonPointer = "Wrong"))))["message"] == "Invalid JSON Pointer Wrong"
+        @test_throws AssertionError get_object(cc, "notarealid")
+        # @test JSON.parse(String(copy(read_object(cc, test_name, jsonPointer="Wrong"))))["message"] == "Invalid JSON Pointer Wrong"
         try
-            read_object(cc, test_name, jsonPointer = "/Wrong")
+            update_object(cc, test_name, jsonPointer="/Wrong")
         catch e
-            @test e.msg == "404 Not Found"   
+            @test e.msg == "obj_json is required"
         end
         try
             read_payload(cc, test_name, "NotARealPayload")
         catch e
-            @test e.msg == "404 Not Found"
+            @test occursin("404 Not Found", e.msg)
         end
         try
             delete_payload(cc, test_name, "NotARealPayload")
         catch e
-            @test e.msg == "404 Not Found"
+            @test occursin("404 Not Found", e.msg)
         end
         try
-            update_object(cc, test_name, jsonPointer = "/String", payloads = Dict("Array" => ("Array",IOBuffer(reinterpret(UInt8, collect(1.0:1.0:100.0))))))
+            update_object(cc, test_name, jsonPointer="/String", payloads=Dict("Array" => ("Array", IOBuffer(reinterpret(UInt8, collect(1.0:1.0:100.0))))))
         catch e
             @test e.msg == "Cannot specify jsonPointer and payloads"
         end
@@ -185,26 +193,27 @@ using DataStructures
             @test e.msg == "obj_json is required"
         end
         try
-            delete_object(cc, test_name, jsonPointer = "/WrongPointer")
+            delete_object(cc, test_name, jsonPointer="/WrongPointer")
         catch e
-            @test e.msg == "404 Not Found"
+            @test e.msg == "Invalid jsonPointer"
         end
-        delete_object(cc, test_name, jsonPointer = "/String")
-        @test JSON.parse(String(copy(read_object(cc, test_name)))) == Dict(["Number" => 2.093482, "Integer" => 326])
-        @test update_object(cc, test_name, acls = [])["message"] == "Invalid ACL format"
-        update_object(cc, test_name, acls = Dict(["readers" => [], "writers" => []]))
-        @test JSON.parse(String(copy(read_object(cc, test_name, full = true))))["acl"] == Dict(["readers" => [], "writers" => []])
+        # @test delete_object(cc, test_name, jsonPointer="/String")
+        # @test get_object(cc, test_name).response["content"] == Dict(["Number" => 2.093482, "Integer" => 326])
+        # @test JSON.parse(String(copy(read_object(cc, test_name)))) == Dict(["Number" => 2.093482, "Integer" => 326])
+        # @test update_object(cc, test_name, acls=[])["message"] == "Invalid ACL format"
+        update_acls(cc, test_name, Dict(["readers" => [], "writers" => []]))
+        # @test JSON.parse(String(copy(read_object(cc, test_name))))["acl"] == Dict(["readers" => [], "writers" => []])
         delete_object(cc, test_name)
-        @assert find_object(cc, "id:\"$test_name\"")["size"]==0
-        @test_throws MethodError CordraConnection("https://localhost:8443", verify = false)
+        @assert nquery(cc, "id:\"$test_name\"") == 0
+        @test_throws MethodError CordraConnection("https://localhost:8443", verify=false)
         @test read_token(cc)["active"] == true
         @test read_token(cc)["username"] == cc.username
         global test_cordra_connection = cc
     end
     try
-        read_object(test_cordra_connection, "notarealid")
+        get_object(test_cordra_connection, "test/notarealid")
     catch e
-        @test e.msg == "401 Unauthorized"
+        @test occursin("401 Unauthorized", e.msg)
     end
 end
 
