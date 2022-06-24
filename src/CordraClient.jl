@@ -9,6 +9,7 @@ using DataFrames
 
 # The external interface to the CordraClient package
 export CordraConnection
+export CordraPayload
 export content
 export create_object
 export create_schema
@@ -91,13 +92,12 @@ struct CordraConnection
             status_exception=true
         )))
         _prefix = p["handleMintingConfig"]["prefix"]
-        println(r)
         new(host, _prefix, r["username"], r["access_token"], verify)
     end
 end
 
 Base.show(io::IO, cc::CordraConnection) = # 
-    print(io, "Cordra[$(cc.host)/$(cc.prefix) as $(cc.username)]")
+    print(io, "CordraConnection($(cc.host)/$(cc.prefix) as $(cc.username))")
 
 function Base.open(f::Function, ::Type{CordraConnection}, host::AbstractString, username::AbstractString, password::Union{Nothing,AbstractString}=nothing; verify::Bool=true, full::Bool=false)
     cc = CordraConnection(host, username, password; verify=verify, full=full)
@@ -144,7 +144,7 @@ struct CordraHandle
 end
 
 Base.show(io::IO, ch::CordraHandle) = #
-    print(io, "CordraHandle[$(ch.value)]")
+    print(io, "CordraHandle($(ch.value))")
 
 struct CordraResponse
     body::Vector{UInt8}
@@ -187,7 +187,7 @@ struct CordraObject
 end
 
 Base.show(io::IO, co::CordraObject) = #
-    print(io, "CordraObject[$(co.handle.value)]")
+    print(io, "CordraObject($(co.handle.value))")
 
 # Helper to convert UInt8[] to JSON
 _json(r::CordraResponse) = JSON.parse(String(copy(r.body)))
@@ -205,6 +205,43 @@ end
 content(co::CordraObject) = co.response["content"]
 
 """
+    CordraPayload(filename::String, mime::String)
+
+Construct a CordraPayload for an existing file.
+
+Example:
+```julia-repl
+julia> cp1=CordraPayload("Desktop\\trialC.svg", "image/svg+xml")
+julia> cp2=CordraPayload("Desktop\\GSR2020.tsv", "text/tab-separated-values")
+```
+"""
+struct CordraPayload
+    name::String
+    filename::String
+    mime::String
+    function CordraPayload(filename::String, mime::String)
+        @assert isfile(filename) "CordraPayload: $filename must be an existing file."
+        name = splitpath(filename)[end]
+        new(name, filename, mime)
+    end
+end
+
+function _tomultipart(cpls::Vector{CordraPayload})
+    res = Dict{String, HTTP.Multipart}()
+    ios = IO[]
+    for (i, cpl) in enumerate(cpls)
+        io = open(cpl.filename, "r")
+        push!(ios, io)
+        res["Payload$i"] = HTTP.Multipart(cpl.name, io, cpl.mime)
+    end
+    return ios, res
+end
+_tomultipart(cpl::CordraPayload) = _tomultipart([cpl])
+function _tomultipart(::Nothing)
+    return IO[], Dict{String, HTTP.Multipart}()
+end
+
+"""
     create_object(
         cc::CordraConnection,
         obj_json::Union{AbstractDict, DataFrameRow},   # The object's JSON data.
@@ -212,20 +249,11 @@ content(co::CordraObject) = co.response["content"]
         handle = nothing,              # The object's ID including Cordra's prefix <prefix/id>
         suffix = nothing,              # The object's ID
         dryRun = false,                # Don't actually add the item
-        payloads = nothing,            # payload data (like binary or file data)
+        payloads::Union{Nothing,CordraPayload, Vector{CordraPayload}}=nothing, # Data to attach to the object
         acls = nothing                 # Access control lists
     )::CordraObject
 
 Create a Cordra database object. Return a `CordraObject`.
-
-Syntax for `payloads`:
-
-    ["FileDescription" => HTTP.Multipart("name",io,"mime/type")]
-    ["FileDescription" => ("name",io,"mime/type")]
-    Dict("FileDescription" => ("name",io,"mime/type"))
-    Dict("FileDescription" => ("name",io))
-    Dict("FileDescription" => ["name",io])
-    Dict("FileDescription" => HTTP.Multipart("name",io,"mime/type"))
 
 or similar where `io` is an `IOStream`.
 
@@ -268,7 +296,7 @@ function create_object(
     handle=nothing,
     suffix=nothing,
     dryRun::Bool=false,
-    payloads=nothing,
+    payloads::Union{Nothing,CordraPayload,Vector{CordraPayload}}=nothing,
     acls=nothing
 )::CordraObject
 
@@ -288,15 +316,16 @@ function create_object(
     # Build the data with acl
     data = Dict{String,Any}("content" => JSON.json(obj_json))
     (isnothing(acls)) || (data["acl"] = JSON.json(acls))
-    if !isnothing(payloads)
-        for (x, y) in payloads
-            data[x] = _mp(y)
-        end
+    ios, pls = _tomultipart(payloads)
+    try
+        merge!(data, pls)
+        # Post the object
+        response = CordraResponse(HTTP.post(uri, auth(cc), HTTP.Form(data); require_ssl_verification=cc.verify, status_exception=false))
+        (response.status != 200) && error(_json(response)) # not successful = no CordraObject
+        return CordraObject(response, cc)
+    finally
+        close.(ios)
     end
-    # Post the object
-    response = CordraResponse(HTTP.post(uri, auth(cc), HTTP.Form(data); require_ssl_verification=cc.verify, status_exception=false))
-    (response.status != 200) && error(_json(response)) # not successful = no CordraObject
-    return CordraObject(response, cc)
 end
 
 function create_object(
@@ -495,7 +524,7 @@ export_payload(
         jsonPointer=nothing,
         obj_type=nothing,
         dryRun=false,
-        payloads=nothing,
+        payloads::Union{Nothing,CordraPayload,Vector{CordraPayload}}=nothing,
         payloadToDelete=nothing
     )::CordraObject
 
@@ -509,7 +538,7 @@ function update_object(
     jsonPointer=nothing,
     obj_type=nothing,
     dryRun=false,
-    payloads=nothing,
+    payloads::Union{Nothing,CordraPayload,Vector{CordraPayload}}=nothing,
     payloadToDelete=nothing
 )::CordraObject
     # Getting CordraConnection and handle
@@ -528,20 +557,22 @@ function update_object(
     (isnothing(payloadToDelete)) || (params["payloadToDelete"] = payloadToDelete)
 
     uri = URI(parse(URI, "$(cc.host)/objects/$handle"), query=params)
-    if !isnothing(payloads) # multi-part request
-        (isnothing(jsonPointer)) || error("Cannot specify jsonPointer and payloads")
-        # Construct the body
-        for (x, y) in payloads
-            data[x] = _mp(y)
+    ios, pls = _tomultipart(payloads)
+    try
+        if isempty(pls) # multi-part request
+            (isnothing(jsonPointer)) || error("Cannot specify jsonPointer and payloads")
+            # Construct the body
+            merge!(data, pls)
+            body = HTTP.Form(data)
+            response = CordraResponse(HTTP.put(uri, auth(cc), body; require_ssl_verification=cc.verify, status_exception=false))
+        else # just update object
+            isnothing(obj_json) && error("obj_json is required")
+            response = CordraResponse(HTTP.put(uri, auth(cc), JSON.json(obj_json); require_ssl_verification=cc.verify, status_exception=false))
         end
-        print(data)
-        body = HTTP.Form(data)
-        response = CordraResponse(HTTP.put(uri, auth(cc), body; require_ssl_verification=cc.verify, status_exception=false))
-    else # just update object
-        isnothing(obj_json) && error("obj_json is required")
-        response = CordraResponse(HTTP.put(uri, auth(cc), JSON.json(obj_json); require_ssl_verification=cc.verify, status_exception=false))
+        return CordraObject(response, cc)
+    catch
+        close.(ios)
     end
-    return CordraObject(response, cc)
 end
 
 """
