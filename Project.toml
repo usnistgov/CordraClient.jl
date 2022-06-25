@@ -12,7 +12,7 @@ Reexport = "189a3867-3050-52da-a836-e630ba90ab69"
 URIs = "5c2747f8-b7ea-4ff2-ba2e-563bfd36b1d4"
 
 [compat]
-HTTP = "^0.9.16"
+HTTP = "^0.9.16, 1"
 JSON = "^0.21"
 Reexport = "^1.2"
 URIs = "^1.3"
