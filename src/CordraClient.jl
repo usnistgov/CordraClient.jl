@@ -15,12 +15,13 @@ export create_schema
 export payloads
 export read_payload
 export export_payload
+export process_payload
+export delete_payload
 export update_object
 export update_acls
 export delete_object
 export query
 export read_token
-export delete_payload
 export get_object
 export query_ids
 export nquery
@@ -40,7 +41,6 @@ export @cp_str
         full::Bool=false
     )
 
-
 Uses a username and password to construct a token which will be used to access a Cordra host.
 
 If no `password` is specified - the argument can be omitted - the user will be prompted to enter one.
@@ -53,8 +53,13 @@ julia> open(CordraConnection, <path to config file>) do cc
         <execute commands here with cc as the CordraConnection object>
         create_object(cc, my_dict, "mytype")
     end
+julia> cc = CordraConnection("https::/localhost:8443","user","password")
+CordraConnection(https://localhost:8443/test as user)
 ```
-Note that this `CordraConnection` will only be valid inside the context manager: the `token` is deleted from Cordra once Julia closes the context manager.
+Note that in the first example, the `CordraConnection` will only be valid inside the `do` block.
+In the second, it is valid until it times out or `close(cc)`
+
+See [`create_object`](@ref) for examples of using a CordraConnection.
 """
 struct CordraConnection
     host::String # URL of host
@@ -280,9 +285,11 @@ end
 
 Create a Cordra database object. Return a `CordraObject`.
 
-The function `build_acls(...)` is useful for looking up the user and group IDs necessary for the ACL.
+The function `build_acls(...)` is useful for looking up the user and group IDs necessary for the acls argument.
 
-# Examples
+The function `payload(...)` and macro cp"...." are useful for constructing payload objects.
+
+# Example
 ```julia-repl
 julia> cc=CordraConnection("https://localhost:8443","user","password")
 CordraConnection(https://localhost:8443/test as admin)
@@ -313,11 +320,20 @@ Dict{String, Any} with 5 entries:
   "modifiedBy" => "username"
   "createdOn"  => 1656157509090
   "modifiedOn" => 1656157509090
-```
 julia> payloads(obj)
 2-element Vector{Dict{String, Any}}:
  Dict("name" => "Payload1", "mediaType" => "image/svg+xml", "filename" => "trailC.svg", "size" => 29443)
  Dict("name" => "Payload2", "mediaType" => "text/tab-separated-values", "filename" => "GSR2020.tsv", "size" => 813962)
+ julia> fn=export_payload(obj, "Payload2")
+ "C:\\Users\\user\\AppData\\Local\\Temp\\jl_ku6bKo\\GSR2020.tsv"
+ julia> df=process_payload(io->CSV.read(io, DataFrame, delim="\\t"), co, "Payload2")
+ 24×6 DataFrame
+ Row │ Z      10 keV       20 keV       30 keV   40 keV       49 keV      
+     │ Int64  Float64?     Float64?     Float64  Float64?     Float64?
+─────┼────────────────────────────────────────────────────────────────────
+   1 │     6        0.069        0.06     0.052        0.054        0.052
+...
+```
 """
 function create_object(
     cc::CordraConnection,
@@ -428,7 +444,6 @@ function get_schema(
     return _json(CordraResponse(HTTP.get(uri, auth(cc); require_ssl_verification=cc.verify, status_exception=false)))
 end
 
-
 """
     get_object(
         handle::CordraHandle
@@ -455,7 +470,7 @@ get_object(
         coh::CordraHandle|CordraObject
     )::Vector{Dict{String,Any}}
 
-Retrieve a Cordra object payload info by identifier.
+Retrieve information about the payload associate with a Cordra object or handle.
 """
 function payloads(
     handle::CordraHandle
@@ -468,7 +483,7 @@ function payloads(
 end
 payloads(
     obj::CordraObject
-) = get(obj.response, "payloads", Vector{Any}[])
+)::Vector{Dict{String,Any}} = get(obj.response, "payloads", Vector{Dict{String,Any}}[])
 
 """
     read_payload(
@@ -529,12 +544,39 @@ function export_payload(
     @assert !isnothing(fname) "$co does not contain a payload with name = $payload."
     filename = something(
         filename,
-        joinpath(tempdir(), fname)  # A temporary file that is not cleaned up
+        joinpath(mktempdir(), fname)  # A temporary file in a temporary dir that is cleaned up on process exit
     )
     open(filename, "w") do f
         write(f, read_payload(handle(co), payload))
     end
     return filename
+end
+
+"""
+    process_payload(
+        f::Function,
+        co::CordraObject,
+        payload::AbstractString
+    )
+
+Apply the function `f` to an IOStream created from the specified payload. Return the result
+from `f`.
+
+```julia-repl
+julia> sp=process_payload(loadspectrum, co, "Payload1")
+```
+"""
+function process_payload(
+    f::Function,
+    co::CordraObject,
+    payload::AbstractString
+)
+    io = IOBuffer(read_payload(handle(co), payload))
+    try
+        return f(io)
+    finally
+        close(io)
+    end
 end
 
 """
