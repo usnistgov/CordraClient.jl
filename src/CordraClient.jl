@@ -9,11 +9,10 @@ using DataFrames
 
 # The external interface to the CordraClient package
 export CordraConnection
-export CordraPayload
-export content
+export content, handle, metadata, schema_type
 export create_object
 export create_schema
-export read_payload_info
+export payloads
 export read_payload
 export export_payload
 export update_object
@@ -28,7 +27,8 @@ export nquery
 export update_schema
 export get_schema
 export build_acls
-
+export payload
+export @cp_str
 
 """
     CordraConnection(
@@ -205,16 +205,18 @@ function _prefix(cc::CordraConnection, handle::AbstractString)
 end
 
 content(co::CordraObject) = co.response["content"]
-
+handle(co::CordraObject) = co.handle
+metadata(co::CordraObject) = co.response["metadata"]
+schema_type(co::CordraObject) = co.response["type"]
 """
     CordraPayload(filename::String, mime::String)
 
-Construct a CordraPayload for an existing file.
+Use the `payload(...)` method to construct a CordraPayload for a local file.
 
 Example:
 ```julia-repl
-julia> cp1=CordraPayload("Desktop\\trialC.svg", "image/svg+xml")
-julia> cp2=CordraPayload("Desktop\\GSR2020.tsv", "text/tab-separated-values")
+julia> cp1=payload("Desktop\\trialC.svg", "image/svg+xml")
+julia> cp2=cp"Desktop\\GSR2020.tsv"
 julia> create_object(cc, json, "Stuff", payloads = [cp1, cp2])
 ```
 """
@@ -223,10 +225,30 @@ struct CordraPayload
     filename::String
     mime::String
     function CordraPayload(filename::String, mime::String)
-        @assert isfile(filename) "CordraPayload: $filename must be an existing file."
+        @assert isfile(filename) "CordraPayload: $filename is not an existing file."
         name = splitpath(filename)[end]
         new(name, filename, mime)
     end
+end
+
+Base.show(io::IO, cp::CordraPayload) = print(io,"CordraPayload($(cp.name), $(cp.mime))")
+
+"""
+    payload(fname::AbstractString, mime=nothing)
+
+Creates a CordraPayload from a filename.  If `mime` is nothing then
+guesses the mime-type using HTTP.sniff(...).
+"""
+function payload(fname::AbstractString, mime=nothing)
+    @assert isfile(fname) "payload(...): $fname is not an existing file."
+    mime=something(mime, open(fname,"r") do io
+        HTTP.sniff(read(io,512))
+    end)
+    CordraPayload(fname, mime)
+end
+
+macro cp_str(fname::AbstractString)
+    payload(fname)
 end
 
 function _tomultipart(cpls::Vector{CordraPayload})
@@ -248,7 +270,7 @@ end
     create_object(
         cc::CordraConnection,
         obj_json::Union{AbstractDict, DataFrameRow},   # The object's JSON data or a DataFrame row to convert to JSON.
-        obj_type::AbstractString;      # The object's data schema name.
+        schema_type::AbstractString;      # The object's data schema name.
         handle = nothing,              # The object's ID including Cordra's prefix <prefix/id>
         suffix = nothing,              # The object's ID
         dryRun = false,                # Don't actually add the item
@@ -262,36 +284,45 @@ The function `build_acls(...)` is useful for looking up the user and group IDs n
 
 # Examples
 ```julia-repl
-julia> cc = CordraConnection("https://localhost:8443", "admin", "password"; verify = false)
-[...]
+julia> cc=CordraConnection("https://localhost:8443","user","password")
+CordraConnection(https://localhost:8443/test as admin)
 julia> my_dict = Dict{String, Any}(["name" => "Julia", "version" => 1.7])
 Dict{String, Any} with 2 entries:
   "name"    => "Julia"
   "version" => 1.7
-julia> my_type = "ProgrammingLanguage" # Cordra Object Type (schema in database)
+julia> schema_type = "ProgrammingLanguage" # Cordra Object Type (schema in database)
 "ProgrammingLanguage"
 julia> acls = build_acls(readers=["nicholas", "camilo"], writers=["camilo"], payloadreaders=["nicholas","GFNB"])
-julia> obj = create_object(cc, my_dict, my_type, acls = acls)
-CordraClient.CordraObject(Dict{String, Any}("content" => Dict{String, Any}("name" => "Julia", "version" => 1.7), 
-"id" => "test/11972sdb4389373", "metadata" => Dict{String, Any}("createdBy" => "admin", "modifiedBy" => "admin",
-"createdOn" => 1655913009, "modifiedOn" => 16559139109), "type" => "ProgrammingLanguage"), CordraClient.CordraHandle("test/11972sdb4389373",
-CordraConnection("https://localhost:8443", "test", "admin", "1c2hofadfr6heyfskug2ltwhh", false)))
-julia> obj.response
-Dict{String, Any} with 4 entries:
-  "content"  => Dict{String, Any}("name"=>"Julia", "v…
-  "id"       => "test/75702da268e6150922fc"
-  "metadata" => Dict{String, Any}("createdBy"=>"admin…
-  "type"     => "ProgrammingLanguage"
-julia> obj.handle.value
-"test/11972sdb4389373"
-julia> typeof(obj)
-CordraClient.CordraObject
+julia> cp1=payload("Desktop\\trialC.svg", "image/svg+xml")
+julia> cp2=cp"Desktop\\GSR2020.tsv"
+julia> obj = create_object(cc, my_dict, schema_type, acls = acls, payloads=[cp1,cp2])
+CordraObject(test/e64d664b335757ab1b0e)
+julia> content(obj)
+Dict{String, Any} with 3 entries:
+  "name"    => "Julia"
+  "id"      => "test/e64d664b335757ab1b0e"
+  "version" => 1.7
+julia> handle(obj)
+CordraHandle(test/e64d664b335757ab1b0e)
+julia> schema_type(obj)
+"ProgrammingLanguage"
+julia> metadata(obj)
+Dict{String, Any} with 5 entries:
+  "createdBy"  => "username"
+  "txnId"      => 1656157509093001
+  "modifiedBy" => "username"
+  "createdOn"  => 1656157509090
+  "modifiedOn" => 1656157509090
 ```
+julia> payloads(obj)
+2-element Vector{Dict{String, Any}}:
+ Dict("name" => "Payload1", "mediaType" => "image/svg+xml", "filename" => "trailC.svg", "size" => 29443)
+ Dict("name" => "Payload2", "mediaType" => "text/tab-separated-values", "filename" => "GSR2020.tsv", "size" => 813962)
 """
 function create_object(
     cc::CordraConnection,
     obj_json::AbstractDict,
-    obj_type::AbstractString;
+    schema_type::AbstractString;
     handle=nothing,
     suffix=nothing,
     dryRun::Bool=false,
@@ -305,7 +336,7 @@ function create_object(
     _mp(y::HTTP.Multipart) = y
     # Set up uri with params
     params = Dict{String,Any}(
-        "type" => obj_type
+        "type" => schema_type
     )
     (isnothing(suffix)) || (params["suffix"] = replace(suffix, r"\s" => "_"))
     (isnothing(handle)) || (params["handle"] = replace(handle, r"\s" => "_" ))
@@ -326,25 +357,24 @@ function create_object(
         close.(ios)
     end
 end
-
 function create_object(
     cc::CordraConnection,
     obj::DataFrameRow,
-    obj_type::AbstractString;
+    schema_type::AbstractString;
     vargs...
 )
     obj_json = OrderedDict(zip(n, map(x -> getproperty(obj, x), names(obj))))
-    create_object(cc, obj_json, obj_type; vargs...)
+    create_object(cc, obj_json, schema_type; vargs...)
 end
 
 """
     create_schema(
         cc::CordraConnection,
         name::AbstractString,      # The schema name.
-        obj_json::AbstractDict,        # The schema's JSON data.
+        obj_json::AbstractDict,    # The schema's JSON data.
     )::Bool
 
-Create a Cordra schema definition. Return `true` if successful.
+Register a Cordra schema definition. Return `true` if successful.
 
 """
 function create_schema(
@@ -364,11 +394,10 @@ end
     update_schema(
         cc::CordraConnection,
         name::AbstractString,      # The schema name.
-        obj_json::AbstractDict,        # The schema's JSON data.
+        obj_json::AbstractDict,    # The schema's JSON data.
     )::Bool
 
 Update a Cordra schema definition. Return `true` if successful.
-
 """
 function update_schema(
     cc::CordraConnection,
@@ -390,7 +419,6 @@ end
     )::Dict{String, Any}
 
 Retrieve schema definition in Cordra by name.
-
 """
 function get_schema(
     cc::CordraConnection,
@@ -403,12 +431,10 @@ end
 
 """
     get_object(
-        cc::CodraConnection,
-        handle::AbstractString
+        handle::CordraHandle
     )::CordraObject
 
-Retrieve a Cordra object by its unique identifier. Return a `CordraObject`.
-
+Retrieve a Cordra object by its unique handle. Return a `CordraObject`.
 """
 function get_object(
     handle::CordraHandle
@@ -419,18 +445,19 @@ function get_object(
     response = CordraResponse(HTTP.get(uri, auth(cc); require_ssl_verification=cc.verify, status_exception=false))
     return CordraObject(response, cc)
 end
+get_object(
+    cc::CordraConnection,
+    handle::AbstractString
+) = get_object(CordraHandle(handle, cc))
 
 """
-    read_payload_info(
-        handle::CordraHandle
-    )::Vector{Dict{String,Any}}
-    read_payload_info(
-        co::CordraObject
+    payloads(
+        coh::CordraHandle|CordraObject
     )::Vector{Dict{String,Any}}
 
 Retrieve a Cordra object payload info by identifier.
 """
-function read_payload_info(
+function payloads(
     handle::CordraHandle
 )::Vector{Dict{String,Any}}
     # Getting CordraConnection and handle
@@ -439,15 +466,16 @@ function read_payload_info(
     r = _json(CordraResponse(HTTP.get(uri, auth(cc); require_ssl_verification=cc.verify, status_exception=false)))
     return get(r, "payloads", Vector{Dict{String,Any}}())
 end
-read_payload_info(co::CordraObject) = read_payload_info(co.handle)
+payloads(
+    obj::CordraObject
+) = get(obj.response, "payloads", Vector{Any}[])
 
 """
     read_payload(
-        co::CordraHandle|CordraObject,
-        payload::AbstractString
-    )
+        coh::CordraHandle|CordraObject
+    )::Vector{UInt8}
 
-Retrieve a Cordra object payload by identifier and payload name.
+Retrieve a Cordra object payload by identifier.
 """
 function read_payload(
     handle::CordraHandle,
@@ -472,31 +500,49 @@ end
         filename::AbstractString
     )
 
-Write the payload out to a file.  Return the filename.
+Write a payload out to a file.  Return the name of the file to which it was written.
 """
 function export_payload(
     handle::CordraHandle,
     payload::AbstractString,
-    filename::AbstractString
+    filename::Union{Nothing, AbstractString}=nothing
 ) 
+    filename = something(
+        filename,
+        tempname()  # A temporary file that will be cleaned up automatically upon process termination
+    )
     open(filename, "w") do f
         write(f, read_payload(handle, payload))
     end
     return filename
 end
-export_payload(
+function export_payload(
     co::CordraObject,
     payload::AbstractString,
-    filename::AbstractString
-)  = export_payload(co.handle, payload, filename)
-
+    filename::Union{Nothing, AbstractString}=nothing
+)    
+    function payload_to_filename(pl, pls) 
+        i = findfirst(d->get(d, "name", "")==pl, pls)
+        isnothing(i) ? nothing : pls[i]["filename"]
+    end
+    fname=payload_to_filename(payload, co.response["payloads"])
+    @assert !isnothing(fname) "$co does not contain a payload with name = $payload."
+    filename = something(
+        filename,
+        joinpath(tempdir(), fname)  # A temporary file that is not cleaned up
+    )
+    open(filename, "w") do f
+        write(f, read_payload(handle(co), payload))
+    end
+    return filename
+end
 
 """
     update_object(
         co::CordraObject;
         obj_json=nothing,
         jsonPointer=nothing,
-        obj_type=nothing,
+        schema_type=nothing,
         dryRun=false,
         payloads::Union{Nothing,CordraPayload,Vector{CordraPayload}}=nothing,
         payloadToDelete=nothing
@@ -510,7 +556,7 @@ function update_object(
     co::CordraObject;
     obj_json=nothing,
     jsonPointer=nothing,
-    obj_type=nothing,
+    schema_type=nothing,
     dryRun=false,
     payloads::Union{Nothing,CordraPayload,Vector{CordraPayload}}=nothing,
     payloadToDelete=nothing
@@ -523,7 +569,7 @@ function update_object(
     _mp(y::HTTP.Multipart) = y
     # Configure params
     params = Dict{String,Any}("full" => true)
-    (isnothing(obj_type)) || (params["type"] = obj_type)
+    (isnothing(schema_type)) || (params["type"] = schema_type)
     dryRun && (params["dryRun"] = true)
     (isnothing(jsonPointer)) || (params["jsonPointer"] = jsonPointer)
     isnothing(obj_json) && (data = Dict{String,Any}("content" => JSON.json(co.response["content"])))
