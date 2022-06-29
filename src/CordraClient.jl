@@ -64,8 +64,8 @@ See [`create_object`](@ref) for examples of using a CordraConnection.
 struct CordraConnection
     host::String # URL of host
     prefix::String # prefix of repository
-    username::String # Username
-    token::String # Authentication token
+    username::Union{String,Nothing} # Username
+    token::Union{String,Nothing} # Authentication token
     verify::Bool # Require SSL verification?
 
     function CordraConnection(host::AbstractString, username::AbstractString, password::Union{Nothing,AbstractString}=nothing; verify::Bool=true, full::Bool=false)
@@ -99,11 +99,25 @@ struct CordraConnection
         _prefix = p["handleMintingConfig"]["prefix"]
         new(host, _prefix, r["username"], r["access_token"], verify)
     end
+    function CordraConnection(host::AbstractString; verify::Bool=true, full::Bool=false)
+        # getting prefix
+        p = _json(CordraResponse(HTTP.request(
+            "GET",
+            "$host/design",
+            [],
+            [],
+            require_ssl_verification=verify,
+            status_exception=true
+        )))
+        _prefix = p["handleMintingConfig"]["prefix"]
+        new(host, _prefix, nothing, nothing, verify)
+    end
 end
 
-Base.show(io::IO, cc::CordraConnection) = # 
+function Base.show(io::IO, cc::CordraConnection) #
+    (isnothing(cc.token)) && (print(io, "Unauthenticated CordraConnection($(cc.host)/$(cc.prefix))"); return)
     print(io, "CordraConnection($(cc.host)/$(cc.prefix) as $(cc.username))")
-
+end
 function Base.open(f::Function, ::Type{CordraConnection}, host::AbstractString, username::AbstractString, password::Union{Nothing,AbstractString}=nothing; verify::Bool=true, full::Bool=false)
     cc = CordraConnection(host, username, password; verify=verify, full=full)
     try
@@ -138,14 +152,17 @@ function Base.close(cc::CordraConnection)
     return true
 end
 
-auth(cc::CordraConnection) = ["Authorization" => "Bearer $(cc.token)"]
+function auth(cc::CordraConnection)::Vector
+    (isnothing(cc.token)) && return []
+    return ["Authorization" => "Bearer $(cc.token)"]
+end
 
 struct CordraHandle
     value::AbstractString
     connection::CordraConnection
     function CordraHandle(value::AbstractString, cc::CordraConnection)
         prefix = split(value, '/')[1]
-        @assert (prefix == cc.prefix) || (startswith(prefix, "\"") && ( prefix[2:end] == cc.prefix )) "Prefix does not match connection's prefix"
+        @assert (prefix == cc.prefix) || (startswith(prefix, "\"") && (prefix[2:end] == cc.prefix)) "Prefix does not match connection's prefix"
         new(value, cc)
     end
 end
@@ -206,7 +223,7 @@ _ch(co::CordraObject) = co.handle.connection, co.handle.value
 # Helper to check a handle's prefix against a CordraConnection's prefix
 function _prefix(cc::CordraConnection, handle::AbstractString)
     prefix = split(handle, '/')[1]
-    @assert prefix == cc.prefix || ( startswith(prefix,"\"") && prefix[2:end]==cc.prefix ) "Handle's prefix does not match connection's prefix"
+    @assert prefix == cc.prefix || (startswith(prefix, "\"") && prefix[2:end] == cc.prefix) "Handle's prefix does not match connection's prefix"
 end
 
 content(co::CordraObject) = co.response["content"]
@@ -236,7 +253,7 @@ struct CordraPayload
     end
 end
 
-Base.show(io::IO, cp::CordraPayload) = print(io,"CordraPayload($(cp.name), $(cp.mime))")
+Base.show(io::IO, cp::CordraPayload) = print(io, "CordraPayload($(cp.name), $(cp.mime))")
 
 """
     payload(fname::AbstractString, mime=nothing)
@@ -246,8 +263,8 @@ guesses the mime-type using HTTP.sniff(...).
 """
 function payload(fname::AbstractString, mime=nothing)
     @assert isfile(fname) "payload(...): $fname is not an existing file."
-    mime=something(mime, open(fname,"r") do io
-        HTTP.sniff(read(io,512))
+    mime = something(mime, open(fname, "r") do io
+        HTTP.sniff(read(io, 512))
     end)
     CordraPayload(fname, mime)
 end
@@ -257,7 +274,7 @@ macro cp_str(fname::AbstractString)
 end
 
 function _tomultipart(cpls::Vector{CordraPayload})
-    res = Dict{String, HTTP.Multipart}()
+    res = Dict{String,HTTP.Multipart}()
     ios = IO[]
     for (i, cpl) in enumerate(cpls)
         io = open(cpl.filename, "r")
@@ -268,7 +285,7 @@ function _tomultipart(cpls::Vector{CordraPayload})
 end
 _tomultipart(cpl::CordraPayload) = _tomultipart([cpl])
 function _tomultipart(::Nothing)
-    return IO[], Dict{String, HTTP.Multipart}()
+    return IO[], Dict{String,HTTP.Multipart}()
 end
 
 """
@@ -355,7 +372,7 @@ function create_object(
         "type" => schema_type
     )
     (isnothing(suffix)) || (params["suffix"] = replace(suffix, r"\s" => "_"))
-    (isnothing(handle)) || (params["handle"] = replace(handle, r"\s" => "_" ))
+    (isnothing(handle)) || (params["handle"] = replace(handle, r"\s" => "_"))
     dryRun && (params["dryRun"] = true)
     params["full"] = true # do not change
     uri = URI(parse(URI, "$(cc.host)/objects"), query=params)
@@ -453,7 +470,7 @@ Retrieve a Cordra object by its unique handle. Return a `CordraObject`.
 """
 function get_object(
     handle::CordraHandle
-) 
+)
     cc, hdl = handle.connection, handle.value
     params = Dict{String,Any}("full" => true)
     uri = URI(parse(URI, "$(cc.host)/objects/$hdl"), query=params)
@@ -520,8 +537,8 @@ Write a payload out to a file.  Return the name of the file to which it was writ
 function export_payload(
     handle::CordraHandle,
     payload::AbstractString,
-    filename::Union{Nothing, AbstractString}=nothing
-) 
+    filename::Union{Nothing,AbstractString}=nothing
+)
     filename = something(
         filename,
         tempname()  # A temporary file that will be cleaned up automatically upon process termination
@@ -534,13 +551,13 @@ end
 function export_payload(
     co::CordraObject,
     payload::AbstractString,
-    filename::Union{Nothing, AbstractString}=nothing
-)    
-    function payload_to_filename(pl, pls) 
-        i = findfirst(d->get(d, "name", "")==pl, pls)
+    filename::Union{Nothing,AbstractString}=nothing
+)
+    function payload_to_filename(pl, pls)
+        i = findfirst(d -> get(d, "name", "") == pl, pls)
         isnothing(i) ? nothing : pls[i]["filename"]
     end
-    fname=payload_to_filename(payload, co.response["payloads"])
+    fname = payload_to_filename(payload, co.response["payloads"])
     @assert !isnothing(fname) "$co does not contain a payload with name = $payload."
     filename = something(
         filename,
@@ -649,15 +666,16 @@ The function queries the Cordra instance for User(s) or Group(s) with the specif
 and fills the resulting dictionary with the associated IDs.
 """
 function build_acls(cc::CordraConnection;
-    readers::Vector{<:AbstractString} = String[],
-    writers::Vector{<:AbstractString} = String[],
-    payloadreaders::Vector{<:AbstractString} = String[]
+    readers::Vector{<:AbstractString}=String[],
+    writers::Vector{<:AbstractString}=String[],
+    payloadreaders::Vector{<:AbstractString}=String[]
 )
-    get_user_ids(usernames) = mapreduce(append!, usernames, init=String[]) do username
-        ids = query_ids(cc,"(type:User AND username=$username) OR (type:Group AND groupName=$username)")
-        isempty(ids) && @warn "There was no User/Group associated with the name \"$username\""
-        map(id->id.value, ids)
-    end
+    get_user_ids(usernames) =
+        mapreduce(append!, usernames, init=String[]) do username
+            ids = query_ids(cc, "(type:User AND username=$username) OR (type:Group AND groupName=$username)")
+            isempty(ids) && @warn "There was no User/Group associated with the name \"$username\""
+            map(id -> id.value, ids)
+        end
     return Dict(
         "readers" => get_user_ids(readers),
         "writers" => get_user_ids(writers),
@@ -676,7 +694,7 @@ Replaces a Cordra object's acls. Return the updated `CordraObject`.
 """
 function update_acls(
     co::CordraObject,
-    acls::Dict{String, Vector{<:AbstractString}};
+    acls::Dict{String,Vector{<:AbstractString}};
     dryRun=false
 )::CordraObject
     # Getting CordraConnection and handle
@@ -756,7 +774,7 @@ Delete a payload from a Cordra object. Return `true` if successful.
 function delete_payload(
     handle::CordraHandle,
     payload::AbstractString
-)::Bool 
+)::Bool
     cc = handle.connection
     params = Dict{String,Any}()
     params["payload"] = payload
