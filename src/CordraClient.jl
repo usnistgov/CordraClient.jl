@@ -632,21 +632,22 @@ function update_object(
     dryRun && (params["dryRun"] = true)
     (isnothing(jsonPointer)) || (params["jsonPointer"] = jsonPointer)
     isnothing(obj_json) && (data = Dict{String,Any}("content" => JSON.json(co.response["content"])))
-
+    isnothing(obj_json) || (data = Dict{String,Any}("content" => JSON.json(obj_json)))
     (isnothing(payloadToDelete)) || (params["payloadToDelete"] = payloadToDelete)
 
     uri = URI(parse(URI, "$(cc.host)/objects/$handle"), query=params)
     ios, pls = _tomultipart(payloads)
     try
-        if isempty(pls) # multi-part request
+        if !(isempty(pls)) # multi-part request
             (isnothing(jsonPointer)) || error("Cannot specify jsonPointer and payloads")
             # Construct the body
             merge!(data, pls)
             body = HTTP.Form(data)
             response = CordraResponse(HTTP.put(uri, auth(cc), body; require_ssl_verification=cc.verify, status_exception=false))
         else # just update object
-            isnothing(obj_json) && error("obj_json is required")
-            response = CordraResponse(HTTP.put(uri, auth(cc), JSON.json(obj_json); require_ssl_verification=cc.verify, status_exception=false))
+            isnothing(jsonPointer) || isnothing(obj_json) && error("obj_json is required")
+            isnothing(jsonPointer) || (data = obj_json)
+            response = CordraResponse(HTTP.put(uri, auth(cc), JSON.json(data); require_ssl_verification=cc.verify, status_exception=false))
         end
         return CordraObject(response, cc)
     catch
