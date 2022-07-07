@@ -13,6 +13,7 @@ export content, handle, metadata, schema_type
 export create_object
 export create_schema
 export payloads
+export payload_names
 export read_payload
 export export_payload
 export process_payload
@@ -246,9 +247,8 @@ struct CordraPayload
     name::String
     filename::String
     mime::String
-    function CordraPayload(filename::String, mime::String)
+    function CordraPayload(name::String, filename::String, mime::String)
         @assert isfile(filename) "CordraPayload: $filename is not an existing file."
-        name = splitpath(filename)[end]
         new(name, filename, mime)
     end
 end
@@ -257,16 +257,20 @@ Base.show(io::IO, cp::CordraPayload) = print(io, "CordraPayload($(cp.name), $(cp
 
 """
     payload(fname::AbstractString, mime=nothing)
+    payload(name::AbstractString, fname::AbstractString, mime=nothing)
 
 Creates a CordraPayload from a filename.  If `mime` is nothing then
 guesses the mime-type using HTTP.sniff(...).
 """
-function payload(fname::AbstractString, mime=nothing)
+function payload(name::AbstractString, fname::AbstractString, mime=nothing)
     @assert isfile(fname) "payload(...): $fname is not an existing file."
     mime = something(mime, open(fname, "r") do io
         HTTP.sniff(read(io, 512))
     end)
-    CordraPayload(fname, mime)
+    CordraPayload(name, fname, mime)
+end
+function payload(fname::AbstractString, mime=nothing)
+    payload(splitpath(fname)[end], fname, mime)
 end
 
 macro cp_str(fname::AbstractString)
@@ -276,10 +280,10 @@ end
 function _tomultipart(cpls::Vector{CordraPayload})
     res = Dict{String,HTTP.Multipart}()
     ios = IO[]
-    for (i, cpl) in enumerate(cpls)
+    for cpl in cpls
         io = open(cpl.filename, "r")
         push!(ios, io)
-        res["Payload$i"] = HTTP.Multipart(cpl.name, io, cpl.mime)
+        res[cpl.name] = HTTP.Multipart(cpl.filename, io, cpl.mime)
     end
     return ios, res
 end
@@ -291,7 +295,7 @@ end
 """
     create_object(
         cc::CordraConnection,
-        obj_json::Union{AbstractDict, DataFrameRow},   # The object's JSON data or a DataFrame row to convert to JSON.
+        obj_json::Union{AbstractDict,DataFrameRow},   # The object's JSON data or a DataFrame row to convert to JSON.
         schema_type::AbstractString;      # The object's data schema name.
         handle = nothing,              # The object's ID including Cordra's prefix <prefix/id>
         suffix = nothing,              # The object's ID
@@ -354,7 +358,7 @@ julia> payloads(obj)
 """
 function create_object(
     cc::CordraConnection,
-    obj_json::AbstractDict,
+    obj_json::Union{AbstractDict,DataFrameRow},
     schema_type::AbstractString;
     handle=nothing,
     suffix=nothing,
@@ -364,9 +368,7 @@ function create_object(
 )::CordraObject
 
     (isnothing(handle)) || (_prefix(cc, handle))
-    # Interpreting payload
-    _mp(y) = HTTP.Multipart(y...)
-    _mp(y::HTTP.Multipart) = y
+
     # Set up uri with params
     params = Dict{String,Any}(
         "type" => schema_type
@@ -384,22 +386,11 @@ function create_object(
         merge!(data, pls)
         # Post the object
         response = CordraResponse(HTTP.post(uri, auth(cc), HTTP.Form(data); require_ssl_verification=cc.verify, status_exception=false))
-        (response.status != 200) && error(_json(response)) # not successful = no CordraObject
         return CordraObject(response, cc)
     finally
         close.(ios)
     end
 end
-function create_object(
-    cc::CordraConnection,
-    obj::DataFrameRow,
-    schema_type::AbstractString;
-    vargs...
-)
-    obj_json = OrderedDict(zip(n, map(x -> getproperty(obj, x), names(obj))))
-    create_object(cc, obj_json, schema_type; vargs...)
-end
-
 """
     create_schema(
         cc::CordraConnection,
@@ -487,7 +478,7 @@ get_object(
         coh::CordraHandle|CordraObject
     )::Vector{Dict{String,Any}}
 
-Retrieve information about the payload associate with a Cordra object or handle.
+Retrieve information about the payload associated with a Cordra object or handle.
 """
 function payloads(
     handle::CordraHandle
@@ -503,8 +494,22 @@ payloads(
 )::Vector{Dict{String,Any}} = get(obj.response, "payloads", Vector{Dict{String,Any}}[])
 
 """
+    payload_names(
+        co::CordraHandle|CordraObject
+    )::Vector{<:AbstractString}
+
+Retrieve names of payloads associated with a Cordra object or handle.
+"""
+function payload_names(co::Union{CordraHandle,CordraObject})::Vector{<:AbstractString}
+    pls = payloads(co)
+    (pls == []) && return String[]
+    [x["name"] for x in pls]
+end
+
+"""
     read_payload(
-        coh::CordraHandle|CordraObject
+        coh::Union{CordraHandle,CordraObject},
+        payload::AbstractString
     )::Vector{UInt8}
 
 Retrieve a Cordra object payload by identifier.
@@ -623,16 +628,14 @@ function update_object(
     # Getting CordraConnection and handle
     cc, handle = _ch(co)
 
-    # Interpreting payload
-    _mp(y) = HTTP.Multipart(y...)
-    _mp(y::HTTP.Multipart) = y
+    _data(obj_json::Nothing)::Dict{String,Any} = Dict(["content" => JSON.json(co.response["content"])])
+    _data(obj_json)::Dict{String,Any} = Dict(["content" => JSON.json(obj_json)])
+
     # Configure params
     params = Dict{String,Any}("full" => true)
     (isnothing(schema_type)) || (params["type"] = schema_type)
     dryRun && (params["dryRun"] = true)
     (isnothing(jsonPointer)) || (params["jsonPointer"] = jsonPointer)
-    isnothing(obj_json) && (data = Dict{String,Any}("content" => JSON.json(co.response["content"])))
-    isnothing(obj_json) || (data = Dict{String,Any}("content" => JSON.json(obj_json)))
     (isnothing(payloadToDelete)) || (params["payloadToDelete"] = payloadToDelete)
 
     uri = URI(parse(URI, "$(cc.host)/objects/$handle"), query=params)
@@ -641,17 +644,19 @@ function update_object(
         if !(isempty(pls)) # multi-part request
             (isnothing(jsonPointer)) || error("Cannot specify jsonPointer and payloads")
             # Construct the body
+            data = _data(obj_json)
             merge!(data, pls)
             body = HTTP.Form(data)
             response = CordraResponse(HTTP.put(uri, auth(cc), body; require_ssl_verification=cc.verify, status_exception=false))
         else # just update object
-            isnothing(jsonPointer) || isnothing(obj_json) && error("obj_json is required")
-            isnothing(jsonPointer) || (data = obj_json)
-            response = CordraResponse(HTTP.put(uri, auth(cc), JSON.json(data); require_ssl_verification=cc.verify, status_exception=false))
+            (!isnothing(jsonPointer) & isnothing(obj_json)) && (error("obj_json is required"))
+            data = _data(obj_json)["content"]
+            response = CordraResponse(HTTP.put(uri, auth(cc), data; require_ssl_verification=cc.verify, status_exception=false))
         end
         return CordraObject(response, cc)
     catch
         close.(ios)
+        rethrow()
     end
 end
 
@@ -695,14 +700,14 @@ Replaces a Cordra object's acls. Return the updated `CordraObject`.
 """
 function update_acls(
     co::CordraObject,
-    acls::Dict{String,Vector{<:AbstractString}};
+    acls::Dict{String,T} where {T<:Union{Array{Any,1},Vector{<:AbstractString}}};
     dryRun=false
 )::CordraObject
     # Getting CordraConnection and handle
     cc, hdl = co.handle.connection, co.handle.value
     data = Dict{String,Any}(
         "content" => JSON.json(co.response["content"]),
-        "acl" => acls
+        "acl" => JSON.json(acls)
     )
     body = HTTP.Form(data)
     # Configure params
@@ -725,12 +730,12 @@ end
         )::Bool
     delete_object(
         handle::CordraHandle
-    )
+        )::Bool
 If `jsonPointer` is specified, instead of deleting the object, only the content at the specified JSON pointer will be deleted (including the pointer itself).
 
 Delete a Cordra Object. Return `true` if successful.
 """
-function delete_object(handle::CordraHandle; params=Dict{String,Any}())
+function delete_object(handle::CordraHandle; params=Dict{String,Any}())::Bool
     cc = handle.connection
     uri = URI(parse(URI, "$(cc.host)/objects/$(handle.value)"), query=params)
     r = _json(CordraResponse(HTTP.delete(uri, auth(cc); require_ssl_verification=cc.verify, status_exception=false)))
@@ -754,7 +759,11 @@ function delete_object(
     end
     delete_object(co.handle, params=params)
 end
-
+delete_object(
+    cc::CordraConnection,
+    handle::AbstractString;
+    jsonPointer::Union{Nothing,AbstractString}=nothing
+)::Bool = delete_object(get_object(cc, handle); jsonPointer=jsonPointer)
 """
     function delete_payload(
         handle::CordraHandle,
@@ -776,6 +785,7 @@ function delete_payload(
     handle::CordraHandle,
     payload::AbstractString
 )::Bool
+    @assert payload in payload_names(handle) "Invalid payload name"
     cc = handle.connection
     params = Dict{String,Any}()
     params["payload"] = payload
