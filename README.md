@@ -12,4 +12,4 @@ and document stores.  We use it for [FAIR](https://en.wikipedia.org/wiki/FAIR_da
 This client library has been developed by Camilo Velez, a student at Montgomery College, under the
 direction of Zach Trautt and Nicholas Ritchie from the National Institute of Standards and Technology.
 
-See the documentation for [`create_object`](@ref) for examples of routine use.
+See the documentation for [`create_object`](@ref) and [`docs/Usage.ipynb`](https://github.com/usnistgov/CordraClient.jl/blob/master/doc/Usage.ipynb) for examples of routine use.
