@@ -66,7 +66,7 @@ struct CordraConnection
     username::Union{String,Nothing} # Username
     token::Union{String,Nothing} # Authentication token
     verify::Bool # Require SSL verification?
-    usernames::Dict{String, String} # Maps username => id for use in acls
+    usernames::Dict{String,String} # Maps username => id for use in acls
     ids::Dict{String,String} # Maps id => username for use in acls
 
     function CordraConnection(host::AbstractString, username::AbstractString, password::Union{Nothing,AbstractString}=nothing; verify::Bool=true, full::Bool=false)
@@ -229,21 +229,21 @@ handle(co::CordraObject) = co.handle
 content(co::CordraObject) = co.response["content"]
 metadata(co::CordraObject) = co.response["metadata"]
 schema_type(co::CordraObject) = co.response["type"]
-function acl(co::CordraObject; resolve=true) 
+function acl(co::CordraObject; resolve=true)
     cc = co.handle.connection
     r = get(co.response, "acl", Dict{String,Vector{String}}())
     if resolve
-        ids = Vector{String}(union( [ id for id in values(r) ]... ))
+        ids = Vector{String}(union([id for id in values(r)]...))
         for id in ids
             if !haskey(cc.ids, id)
                 c = content(get_object(cc, id))
                 cc.ids[id] = get(c, "groupName", get(c, "username", id))
             end
         end
-        r = begin 
+        r = begin
             r2 = Dict{String,Vector{String}}()
             for k in keys(r)
-                r2[k] = map(id->cc.ids[id], r[k])
+                r2[k] = map(id -> cc.ids[id], r[k])
             end
             r2
         end
@@ -399,7 +399,7 @@ function create_object(
     racls = if isnothing(acls)  # Default to the current logged on username
         resolve_acls(cc, readers=[cc.username], writers=[cc.username])
     else
-        resolve_acls(cc, readers=get(acls,"readers",String[]), writers=get(acls,"writers",String[]))
+        resolve_acls(cc, readers=get(acls, "readers", String[]), writers=get(acls, "writers", String[]))
     end
     # Build the data with acl
     data = Dict{String,Any}(
@@ -703,7 +703,7 @@ and fills the resulting dictionary with the associated IDs.
 function resolve_acls(cc::CordraConnection; readers=String[], writers=String[])
     all = union(readers, writers)
     # Look up each unique name once
-    for username in all 
+    for username in all
         if !haskey(cc.usernames, username)
             ids = query_ids(cc, "(type:User AND username=$username) OR (type:Group AND groupName=$username)")
             isempty(ids) && @warn "There is no User/Group associated with the name \"$username\""
@@ -711,8 +711,8 @@ function resolve_acls(cc::CordraConnection; readers=String[], writers=String[])
         end
     end
     return Dict(
-        "readers" => [cc.usernames[user] for user in readers ],
-        "writers" => [cc.usernames[user] for user in writers ]
+        "readers" => [cc.usernames[user] for user in readers],
+        "writers" => [cc.usernames[user] for user in writers]
     )
 end
 
