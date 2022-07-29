@@ -424,8 +424,19 @@ end
         name::AbstractString,      # The schema name.
         obj_json::AbstractDict,    # The schema's JSON data.
     )::Bool
+    create_schema(
+        cc::CordraConnection,
+        name::AbstractString,      # The schema name.
+        obj_json::AbstractString,  # The JSON schema's path 
+    )::Bool
+    create_schema(
+        cc::CordraConnection,
+        obj_json::AbstractString,  # The JSON schema's path 
+    )::Bool
 
 Register a Cordra schema definition. Return `true` if successful.
+
+If `name` is not specified, the file's name will be used.
 
 """
 function create_schema(
@@ -439,6 +450,24 @@ function create_schema(
     CordraResponse(HTTP.put(uri, auth(cc), JSON.json(obj_json), require_ssl_verification=cc.verify, status_exception=false))
 
     return true
+end
+function create_schema(
+    cc::CordraConnection,
+    name::AbstractString,
+    obj_json::AbstractString,
+)::Bool
+    ispath(obj_json) || (error("obj_json must be a path"))
+    json = JSON.parsefile(obj_json)
+    return create_schema(cc, name, json)
+end
+function create_schema(
+    cc::CordraConnection,
+    obj_json::AbstractString,
+)::Bool
+    ispath(obj_json) || (error("obj_json must be a path"))
+    json = JSON.parsefile(obj_json)
+    name = split(basename(obj_json), '.')[1]
+    return create_schema(cc, name, json)
 end
 
 """
