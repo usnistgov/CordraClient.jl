@@ -9,18 +9,21 @@ The function queries the Cordra instance for User(s) or Group(s) with the specif
 and fills the resulting dictionary with the associated IDs.
 """
 function resolve_acls(cc::CordraConnection; readers=String[], writers=String[])
-    all = union(readers, writers)
     # Look up each unique name once
-    for username in all
+    function resolve(user_name)
         if !haskey(cc.usernames, username)
             ids = query_ids(cc, "(type:User AND username=$username) OR (type:Group AND groupName=$username)")
-            isempty(ids) && @warn "There is no User/Group associated with the name \"$username\""
-            cc.usernames[username] = isempty(ids) ? username : ids[1].value
+            if !isempty(ids)
+                cc.usernames[username] = ids[1].value
+            else
+                @warn "There is no User/Group associated with the name \"$username\""
+            end
         end
+        get(cc.usernames, username, nothing)
     end
     return Dict(
-        "readers" => [cc.usernames[user] for user in readers],
-        "writers" => [cc.usernames[user] for user in writers]
+        "readers" => String[](filter(s->!isnothing(s), resolve.(readers))),
+        "writers" => String[](filter(s->!isnothing(s), resolve.(writers)))
     )
 end
 
