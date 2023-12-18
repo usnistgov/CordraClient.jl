@@ -16,6 +16,7 @@ function resolve_acls(cc::CordraConnection; readers=String[], writers=String[])
                 @warn "There is no User or Group associated with the name \"$username\""
             end
         end
+        get(cc.usernames, username, nothing)
     end
     return Dict{String, Vector{String}}(
         "readers" => filter!(!isnothing, resolve.(readers)),
