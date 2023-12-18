@@ -35,8 +35,8 @@ struct CordraConnection
     username::Union{String,Nothing} # Username
     token::Union{String,Nothing} # Authentication token
     verify::Bool # Require SSL verification?
-    usernames::Dict{String,String} # Maps username => id for use in acls
-    ids::Dict{String,String} # Maps id => username for use in acls
+    username_to_id::Dict{String,String} # Maps username => id for use in acls
+    id_to_username::Dict{String,String} # Maps id => username for use in acls
 
     function CordraConnection(host::AbstractString, username::AbstractString, password::Union{Nothing,AbstractString}=nothing; verify::Bool=true, full::Bool=false)
         if isnothing(password)

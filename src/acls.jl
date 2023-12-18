@@ -1,26 +1,25 @@
 """
-    resolve_acls(
-        cc::CordraConnection, 
-        acls::Dict{String, <:AbstractVector}
-    )::Dict{String,String[]}
+    resolve_acls(cc::CordraConnection; readers=String[], writers=String[])
 
 Build an access control list from the user names specified in `readers` and `writers`.
 The function queries the Cordra instance for User(s) or Group(s) with the specified names
 and fills the resulting dictionary with the associated IDs.
 """
 function resolve_acls(cc::CordraConnection; readers=String[], writers=String[])
-    all = union(readers, writers)
-    # Look up each unique name once
-    for username in all
-        if !haskey(cc.usernames, username)
-            ids = query_ids(cc, "(type:User AND username=$username) OR (type:Group AND groupName=$username)")
-            isempty(ids) && @warn "There is no User/Group associated with the name \"$username\""
-            cc.usernames[username] = isempty(ids) ? username : ids[1].value
+    function resolve(username)
+        get!(cc.username_to_id, username) do 
+            ids = query_ids(cc, "(type:User AND username=$username) ) OR (type:Group AND groupName=$username) )")
+            if !isempty(ids)
+                cc.id_to_username[ids[1].value] = username
+                return ids[1].value
+            else
+                @warn "There is no User or Group associated with the name \"$username\""
+            end
         end
     end
-    return Dict(
-        "readers" => [cc.usernames[user] for user in readers],
-        "writers" => [cc.usernames[user] for user in writers]
+    return Dict{String, Vector{String}}(
+        "readers" => filter!(!isnothing, resolve.(readers)),
+        "writers" => filter!(!isnothing, resolve.(writers)),
     )
 end
 
@@ -32,7 +31,7 @@ end
         dryRun::Bool=false
     )::CordraObject
     
-Replaces a Cordra object's access control list. Returns the updated `CordraObject`.
+Replaces a Cordra object's access control list. Returns the `co` with the updated `acls` as reported by Cordra
 """
 function update_acls(
     co::CordraObject;
@@ -43,16 +42,20 @@ function update_acls(
     # Getting CordraConnection and handle
     ch = co.handle
     cc, hdl = ch.connection, ch.value
-    racls = resolve_acls(ch.connection, readers=readers, writers=writers)
-    data = Dict{String,Any}(
-        "content" => JSON.json(co.response["content"]),
-        "acl" => JSON.json(racls)
-    )
-    body = HTTP.Form(data)
+    new_acls = resolve_acls(ch.connection, readers=readers, writers=writers)
+    data = JSON.json(new_acls)
     # Configure params
-    params = Dict{String,Any}("full" => true)
+    params = Dict{String,Any}()
     dryRun && (params["dryRun"] = true)
-    uri = URI(parse(URI, "$(cc.host)/objects/$hdl"), query=params)
-    response = CordraResponse(HTTP.put(uri, auth(cc), body; require_ssl_verification=cc.verify, status_exception=false))
-    return CordraObject(response, cc)
+    updated_acls = _json(HTTP.put(
+        URI(parse(URI, "$(cc.host)/put/acls/$hdl"), query=params),
+        ["Content-type" => "application/json"],
+        HTTP.Form(data),
+        require_ssl_verification=cc.verify,
+        status_exception=false
+    ))
+    if !dryRun
+        co.response["acl"] = updated_acls
+    end
+    return co
 end

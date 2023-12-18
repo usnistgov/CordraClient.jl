@@ -48,20 +48,19 @@ function acl(co::CordraObject; resolve=true)
     cc = co.handle.connection
     r = get(co.response, "acl", Dict{String,Vector{String}}())
     if resolve
-        ids = Vector{String}(union([id for id in values(r)]...))
-        for id in ids
-            if !haskey(cc.ids, id)
+        for id in union(values(r)...)
+            if !haskey(cc.id_to_username, id)
                 c = content(get_object(cc, id))
-                cc.ids[id] = get(c, "groupName", get(c, "username", id))
+                un = get(c, "groupName", get(c, "username", id))
+                cc.id_to_username[id] = un
+                cc.username_to_id[un] = id
             end
         end
-        r = begin
-            r2 = Dict{String,Vector{String}}()
-            for k in keys(r)
-                r2[k] = map(id -> cc.ids[id], r[k])
+        r = Dict{String,Vector{String}}(
+            map(keys(r)) do k
+                (k, map(id -> cc.id_to_username[id], r[k]))
             end
-            r2
-        end
+        )
     end
     return r
 end
